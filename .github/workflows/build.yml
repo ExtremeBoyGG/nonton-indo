@@ -1,45 +1,156 @@
-name: Build Extensions
+name: Build
+
+# https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#concurrency
+concurrency: 
+  group: "build"
+  cancel-in-progress: true
 
 on:
+  workflow_dispatch:  # Allows manual triggering
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - '*.png'
+      - '*.yml'
 
-permissions: 
-  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          path: "src"
 
-      - name: Setup JDK 17
+      - name: Checkout builds branch
+        uses: actions/checkout@v4
+        with:
+          ref: "builds"
+          path: "builds"
+      
+      - name: Clean old builds
+        run: rm $GITHUB_WORKSPACE/builds/*.cs3
+
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: 17
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
-
-      - name: Build all plugins
-        run: ./gradlew assembleRelease
-
-      - name: Copy .cs3 files to build/
+      - name: Build Plugins
         run: |
-          mkdir -p build
-          find . -name "*.cs3" -exec cp {} build/ \;
-          ls -la build/
+          cd $GITHUB_WORKSPACE/src
+          chmod +x gradlew
+          ./gradlew assembleRelease
+          find . -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/ \;
 
-      - name: Upload .cs3 to Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ github.run_number }}
-          name: Build #${{ github.run_number }}
-          files: build/*.cs3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update plugins.json with file sizes
+        run: |
+          cd $GITHUB_WORKSPACE/builds
+          python3 -c "
+import json
+import os
+
+# Read current plugins.json if exists, otherwise create empty array
+if os.path.exists('plugins.json'):
+    with open('plugins.json', 'r') as f:
+        data = json.load(f)
+else:
+    data = []
+
+# Map existing entries by name for easy lookup
+existing = {entry.get('name'): entry for entry in data if isinstance(entry, dict)}
+
+# Process each .cs3 file built
+for cs3_file in os.listdir('.'):
+    if cs3_file.endswith('.cs3'):
+        name = cs3_file[:-4]  # Remove .cs3 extension
+        filepath = os.path.join('.', cs3_file)
+        try:
+            size = os.path.getsize(filepath)
+            # Update or create entry
+            if name in existing:
+                existing[name]['fileSize'] = size
+                existing[name]['downloadCount'] = existing[name].get('downloadCount', 0)
+            else:
+                # Create new entry with default values
+                new_entry = {
+                    'name': name,
+                    'internalName': name,
+                    'version': 1,
+                    'apiVersion': 1,
+                    'repositoryUrl': 'https://github.com/ExtremeBoyGG/nonton-indo',
+                    'fileSize': size,
+                    'downloadCount': 0,
+                    'status': 1,
+                    'language': 'id',
+                    'authors': ['ExtremeBoy'],
+                    'url': f'https://github.com/ExtremeBoyGG/nonton-indo/raw/builds/{cs3_file}',
+                    'iconUrl': f'https://www.google.com/s2/favicons?domain=extremeboygg.github.io&sz=64'
+                }
+                # Set tvTypes based on plugin name
+                if name in ['AnimeIndo', 'Oploverz', 'Otakudesu', 'Nimegami', 'Animasu']:
+                    new_entry['tvTypes'] = ['Anime', 'AnimeMovie', 'OVA']
+                else:  # Pahe, Rebahin, Idlix
+                    new_entry['tvTypes'] = ['Movie', 'TvSeries']
+                data.append(new_entry)
+            print(f'Updated {name}: {size} bytes')
+        except Exception as e:
+            print(f'Error processing {cs3_file}: {e}')
+
+            # Write back plugins.json
+            with open('plugins.json', 'w') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            print('plugins.json updated')
+          "
+
+      - name: Update repo.json
+        run: |
+          cd $GITHUB_WORKSPACE/builds
+          python3 -c "
+import json
+
+# Read current repo.json or create default
+if os.path.exists('repo.json'):
+    with open('repo.json', 'r') as f:
+        data = json.load(f)
+else:
+    data = []
+
+# Build list of plugin names from .cs3 files
+plugins = []
+for f in os.listdir('.'):
+    if f.endswith('.cs3'):
+        plugins.append(f[:-4])  # Remove .cs3
+
+# Update repo.json
+new_entry = {
+    'name': 'nonton-indo',
+    'repositories': ['https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/plugins.json']
+}
+
+# Update or add entry
+found = False
+for i, entry in enumerate(data):
+    if entry.get('name') == 'nonton-indo':
+        data[i] = new_entry
+        found = True
+        break
+if not found:
+    data.append(new_entry)
+
+with open('repo.json', 'w') as f:
+    json.dump(data, f, indent=2)
+print('repo.json updated')
+          "
+
+      - name: Push builds
+        run: |
+          cd $GITHUB_WORKSPACE/builds
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add .
+          git commit --amend -m "Build $GITHUB_SHA" || exit 0   # do not error if nothing to commit
+          git push --force
