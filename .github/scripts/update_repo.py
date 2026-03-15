@@ -1,20 +1,14 @@
 import json
 import os
 
-data = json.load(open('repo.json')) if os.path.exists('repo.json') else []
-
-new_entry = {
-    'name': 'nonton-indo',
-    'repositories': ['https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/plugins.json']
+data = {
+    "name": "nonton-indo",
+    "description": "CloudStream 3 Extensions untuk Situs Streaming Indonesia",
+    "manifestVersion": 1,
+    "pluginLists": [
+        "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/main/plugins.json"
+    ]
 }
-
-# Filter out invalid entries (strings, None, dll) dan entry lama dengan nama sama
-data = [
-    entry for entry in data
-    if isinstance(entry, dict) and entry.get('name') != 'nonton-indo'
-]
-
-data.append(new_entry)
 
 with open('repo.json', 'w') as f:
     json.dump(data, f, indent=2)
