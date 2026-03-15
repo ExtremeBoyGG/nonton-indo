@@ -45,7 +45,6 @@ class Pahe : MainAPI() {
         val year = doc.selectFirst("span:contains(Year), li:contains(Tahun)")?.text()?.let {
             Regex("\\b(19\\d{2}|20\\d{2})\\b").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
-
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
             posterUrl = poster; plot = description; this.tags = tags; this.year = year
         }
@@ -60,8 +59,8 @@ class Pahe : MainAPI() {
         }
         doc.select("a[href*=pahe], a.download-link").mapNotNull { el ->
             el.attr("href").ifBlank { null }
-        }.forEach { src ->
-            loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+        }.forEach { link ->
+            loadExtractor(fixUrl(link), data, subtitleCallback, callback)
         }
         return true
     }
