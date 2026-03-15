@@ -15,8 +15,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -28,7 +26,7 @@ jobs:
         with:
           ref: "builds"
           path: "builds"
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Clean old builds
         run: rm -f $GITHUB_WORKSPACE/builds/*.cs3
@@ -47,14 +45,14 @@ jobs:
           cd $GITHUB_WORKSPACE/src
           chmod +x gradlew
           ./gradlew make makePluginsJson
-          cp **/build/*.cs3 $GITHUB_WORKSPACE/builds
-          cp build/plugins.json $GITHUB_WORKSPACE/builds
+          cp **/build/*.cs3 $GITHUB_WORKSPACE/builds/
+          cp build/plugins.json $GITHUB_WORKSPACE/builds/
 
       - name: Push builds
         run: |
           cd $GITHUB_WORKSPACE/builds
-          git config --local user.email "actions@github.com"
-          git config --local user.name "GitHub Actions"
+          git config --local user.email "extremeboygg@gmail.com"
+          git config --local user.name "ExtremeBoyGG"
           git add .
           git commit --amend -m "Build $GITHUB_SHA" || exit 0
           git push --force
