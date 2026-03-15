@@ -18,22 +18,15 @@ class BloggerExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        // Token langsung dari iframe URL: blogger.com/video.g?token=XXX
         val token = Regex("[?&]token=([^&]+)").find(url)
             ?.groupValues?.getOrNull(1) ?: return
 
-        // Fetch direct video URL via Blogger batchexecute API
-        // Sama persis dengan request yang terlihat di Network tab
+        val freq = "[[[\"WcwnYd\",\"[\\\"" + token + "\\\",\\\"\\\",0]\",null,\"generic\"]]]"
+
         val response = app.post(
             "https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute",
-            params = mapOf(
-                "rpcids" to "WcwnYd",
-                "rt" to "c"
-            ),
-            data = mapOf(
-                "f.req" to """[[["WcwnYd","[\"$token\",\"\",0]",null,"generic"]]]""",
-                "" to ""
-            ),
+            params = mapOf("rpcids" to "WcwnYd", "rt" to "c"),
+            data = mapOf("f.req" to freq, "" to ""),
             referer = url,
             headers = mapOf(
                 "Content-Type" to "application/x-www-form-urlencoded;charset=UTF-8",
@@ -41,13 +34,14 @@ class BloggerExtractor : ExtractorApi() {
             )
         ).text
 
-        // Parse URL googlevideo.com dari response JSON
-        // URL ada di dalam string dengan unicode escape
-        val videoUrl = Regex(""""(https://r[^"\\]+googlevideo\.com/videoplayback[^"\\]+)"""")
-            .find(response)?.groupValues?.getOrNull(1)
-            ?.replace("\\u003d", "=")
-            ?.replace("\\u0026", "&")
-            ?: return
+        // URL googlevideo.com ada di response, dengan unicode escapes
+        val videoUrl = Regex("https://r[\\w.%-]+googlevideo\\.com/videoplayback[\\w.=&%+,;:@!*/?~-]+")
+            .find(
+                response
+                    .replace("\\u003d", "=")
+                    .replace("\\u0026", "&")
+                    .replace("\\/", "/")
+            )?.value ?: return
 
         callback.invoke(
             ExtractorLink(
