@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 
 class Oploverz : MainAPI() {
@@ -155,14 +156,14 @@ class Oploverz : MainAPI() {
             .find(decoded)?.value ?: return
 
         callback.invoke(
-            ExtractorLink(
-                "Blogger",
-                "Blogger",
-                videoUrl,
-                "https://www.blogger.com/",
-                com.lagradost.cloudstream3.utils.Qualities.Unknown.value,
-                false
-            )
+            newExtractorLink(
+                source = "Blogger",
+                name = "Blogger",
+                url = videoUrl,
+            ) {
+                this.referer = "https://www.blogger.com/"
+                this.quality = com.lagradost.cloudstream3.utils.Qualities.Unknown.value
+            }
         )
     }
 }
