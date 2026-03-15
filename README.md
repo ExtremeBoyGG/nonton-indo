@@ -1,6 +1,10 @@
 <p align="center">
   <a href="https://github.com/ExtremeBoyGG/nonton-indo">
-    <img src="https://cdn-icons-png.flaticon.com/512/3136/3136684.png" alt="Logo" width="80" height="80">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://cdn-icons-png.flaticon.com/512/2920/2920297.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://cdn-icons-png.flaticon.com/512/3136/3136684.png">
+      <img src="https://cdn-icons-png.flaticon.com/512/3136/3136684.png" alt="Logo" width="80" height="80">
+    </picture>
   </a>
 
   <h3 align="center">Nonton Indo</h3>
