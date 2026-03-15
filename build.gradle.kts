@@ -39,6 +39,7 @@ subprojects {
     }
 
     android {
+        namespace = "com.indo"
         defaultConfig {
             minSdk = 21
             compileSdkVersion(33)
