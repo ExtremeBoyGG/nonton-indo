@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/ExtremeBoyGG/nonton-indo">
-    <img src="https://img.icons8.com/fluency/96/play-button.png" alt="Logo" width="80" height="80">
+    <img src="https://cdn-icons-png.flaticon.com/512/3136/3136684.png" alt="Logo" width="80" height="80">
   </a>
 
   <h3 align="center">Nonton Indo</h3>
