@@ -5,6 +5,8 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions: 
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -32,38 +34,6 @@ jobs:
           mkdir -p build
           find . -name "*.cs3" -exec cp {} build/ \;
           ls -la build/
-
-      - name: Update plugins.json with file sizes
-        run: |
-          python3 << 'PYEOF'
-          import os, json, glob
-          
-          # Read current plugins.json
-          with open('plugins.json', 'r') as f:
-              plugins = json.load(f)
-          
-          # Update file sizes
-          for plugin in plugins:
-              cs3_file = f"build/{plugin['internalName']}.cs3"
-              if os.path.exists(cs3_file):
-                  plugin['fileSize'] = os.path.getsize(cs3_file)
-                  plugin['version'] = plugin.get('version', 0) + 1
-          
-          # Write updated plugins.json
-          with open('plugins.json', 'w') as f:
-              json.dump(plugins, f, indent=4)
-          
-          print("Updated plugins.json:")
-          print(json.dumps(plugins, indent=4))
-          PYEOF
-
-      - name: Commit plugins.json
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins.json
-          git diff --staged --quiet || git commit -m "chore: Update plugins.json [skip ci]"
-          git push
 
       - name: Upload .cs3 to Release
         uses: softprops/action-gh-release@v1
