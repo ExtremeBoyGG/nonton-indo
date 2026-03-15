@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import java.util.Base64
 
 class Oploverz : MainAPI() {
     override var mainUrl = "https://oploverz.ch"
@@ -24,16 +25,12 @@ class Oploverz : MainAPI() {
         }
     }
 
-    // Homepage menampilkan episode terbaru (bukan series)
-    // Struktur: div berisi img, judul series, judul episode
     override val mainPage = mainPageOf(
         "$mainUrl/series/?status=&type=&order=update&page=" to "Update Terbaru"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data + page).document
-
-        // Selector untuk halaman series list
         val home = document.select("div.bsx, article.bs, div.animepost").mapNotNull { el ->
             val a = el.selectFirst("a[href]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -41,11 +38,8 @@ class Oploverz : MainAPI() {
                 ?: a.attr("title").ifBlank { null }
                 ?: return@mapNotNull null
             val poster = el.selectFirst("img")?.attr("src")?.ifBlank { null }
-            newAnimeSearchResponse(title, href, TvType.Anime) {
-                this.posterUrl = poster
-            }
+            newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = poster }
         }.distinctBy { it.url }
-
         return newHomePageResponse(request.name, home)
     }
 
@@ -58,9 +52,7 @@ class Oploverz : MainAPI() {
                 ?: a.attr("title").ifBlank { null }
                 ?: return@mapNotNull null
             val poster = el.selectFirst("img")?.attr("src")?.ifBlank { null }
-            newAnimeSearchResponse(title, href, TvType.Anime) {
-                this.posterUrl = poster
-            }
+            newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = poster }
         }.distinctBy { it.url }
     }
 
@@ -76,7 +68,6 @@ class Oploverz : MainAPI() {
             ?.attr("src")?.ifBlank { null }
 
         val description = document.selectFirst("div.entry-content > p, div.synp p, div.desc p")?.text()?.trim()
-
         val genres = document.select("a[href*=genres]").map { it.text() }.filter { it.isNotBlank() }
 
         val statusText = document.selectFirst("div.spe span:contains(Status)")
@@ -86,18 +77,12 @@ class Oploverz : MainAPI() {
         val year = document.selectFirst("div.spe span:contains(Released), div.spe span:contains(Tahun)")
             ?.text()?.let { Regex("\\b(20\\d{2})\\b").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
 
-        // Episode list — Oploverz pakai tabel ul#episodelist atau div.eplister
-        // Struktur: <ul><li><a href="..."><div>Ep 1</div><div>Judul</div></a></li></ul>
         val episodes = document.select("div.eplister ul li, ul#episodelist li").mapNotNull { li ->
             val a = li.selectFirst("a") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             val epNum = li.selectFirst("div.epl-num")?.text()?.trim()?.toIntOrNull()
-            val epTitle = li.selectFirst("div.epl-title")?.text()?.trim()
-                ?: a.text().trim()
-            newEpisode(href) {
-                this.name = epTitle
-                this.episode = epNum
-            }
+            val epTitle = li.selectFirst("div.epl-title")?.text()?.trim() ?: a.text().trim()
+            newEpisode(href) { this.name = epTitle; this.episode = epNum }
         }.reversed()
 
         val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), year, true)
@@ -119,19 +104,18 @@ class Oploverz : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data).document
 
-        // Iframe langsung
         val iframes = document.select("iframe").mapNotNull { it.attr("src").ifBlank { null }?.let { fixUrl(it) } }
         for (iframe in iframes) {
             loadExtractor(iframe, data, subtitleCallback, callback)
         }
 
-        // Server selection via JS — coba ambil dari div.server-item atau nonton-dl
+        // Decode base64 server options (pakai java.util.Base64)
         document.select("select.mirror option, div.mirror option").mapNotNull {
             it.attr("value").ifBlank { null }
         }.forEach { encoded ->
             try {
-                val decoded = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT).toString(Charsets.UTF_8)
-                val src = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.getOrNull(1)
+                val decoded = String(Base64.getDecoder().decode(encoded), Charsets.UTF_8)
+                val src = Regex("""src="([^"]+)"""").find(decoded)?.groupValues?.getOrNull(1)
                 if (src != null) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             } catch (_: Exception) { }
         }

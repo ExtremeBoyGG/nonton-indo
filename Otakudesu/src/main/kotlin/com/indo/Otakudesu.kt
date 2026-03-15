@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import java.util.Base64
 
 class Otakudesu : MainAPI() {
     override var mainUrl = "https://otakudesu.blog"
@@ -14,7 +15,6 @@ class Otakudesu : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    // Otakudesu blok bot — perlu User-Agent
     override val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -27,7 +27,6 @@ class Otakudesu : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data + page, headers = headers).document
-
         val home = document.select("div.venz ul li, div.detpost, div.thumb").mapNotNull { el ->
             val a = el.selectFirst("a[href]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -37,7 +36,6 @@ class Otakudesu : MainAPI() {
             val poster = el.selectFirst("img")?.attr("src")?.ifBlank { null }
             newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = poster }
         }.distinctBy { it.url }
-
         return newHomePageResponse(request.name, home)
     }
 
@@ -68,10 +66,7 @@ class Otakudesu : MainAPI() {
             ?: throw ErrorLoadingException("Title not found")
 
         val poster = document.selectFirst("div.fotoanime img, div.thumb img")?.attr("src")?.ifBlank { null }
-
-        // Otakudesu deskripsi ada di div.sinopc atau div.desc
         val description = document.selectFirst("div.sinopc, div.sinopsis, div.desc")?.text()?.trim()
-
         val genres = document.select("div.infozingle p:contains(Genre) a, td:contains(Genre) a").map { it.text() }
 
         val statusText = document.selectFirst("div.infozingle p:contains(Status), td:contains(Status)")
@@ -81,7 +76,6 @@ class Otakudesu : MainAPI() {
         val year = document.selectFirst("div.infozingle p:contains(Musim), div.infozingle p:contains(Tahun)")
             ?.text()?.let { Regex("\\b(20\\d{2})\\b").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
 
-        // Episode list — Otakudesu: div.episodelist > ul > li
         val episodes = document.select("div.episodelist ul li, div.episodelist li").mapNotNull { li ->
             val a = li.selectFirst("a") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -109,20 +103,19 @@ class Otakudesu : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data, headers = headers).document
 
-        // Otakudesu pakai mirrorstream — server dipilih via klik, ada di div.mirrorstream
         val iframes = document.select("iframe").mapNotNull { it.attr("src").ifBlank { null }?.let { fixUrl(it) } }
         for (iframe in iframes) {
             loadExtractor(iframe, data, subtitleCallback, callback)
         }
 
-        // Server list — Otakudesu: ul.mlist li.mirrorstream
+        // Decode base64 mirror servers (pakai java.util.Base64)
         document.select("ul.mlist li, div.mirrorstream li").forEach { li ->
             val encodedData = li.selectFirst("div[data-content], span[data-content]")?.attr("data-content")
                 ?: li.attr("data-content")
             if (encodedData.isNotBlank()) {
                 try {
-                    val decoded = android.util.Base64.decode(encodedData, android.util.Base64.DEFAULT).toString(Charsets.UTF_8)
-                    val iframeSrc = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.getOrNull(1)
+                    val decoded = String(Base64.getDecoder().decode(encodedData), Charsets.UTF_8)
+                    val iframeSrc = Regex("""src="([^"]+)"""").find(decoded)?.groupValues?.getOrNull(1)
                     if (iframeSrc != null) loadExtractor(fixUrl(iframeSrc), data, subtitleCallback, callback)
                 } catch (_: Exception) { }
             }
