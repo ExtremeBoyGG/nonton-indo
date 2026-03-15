@@ -3,6 +3,7 @@ package com.indo
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
+import com.lagradost.cloudstream3.utils.AppUtils.parsedSafe
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -98,72 +99,82 @@ class Oploverz : MainAPI() {
         val document = app.get(data).document
 
         // Iframe Blogger langsung ada di static HTML di div#pembed
-        document.select("div#pembed iframe, div.player-embed iframe, div.video-content iframe").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-            if (!src.startsWith("http")) return@forEach
-
-            // Handle Blogger video langsung tanpa custom extractor
-            if (src.contains("blogger.com/video.g")) {
-                extractBloggerVideo(src, data, callback)
-            } else {
-                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+        document.select("div#pembed iframe, div.player-embed iframe, div.video-content iframe")
+            .forEach { iframe ->
+                val src = iframe.attr("src").ifBlank { null } ?: return@forEach
+                if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
-        }
 
-        // Fallback: download link (gofile, mega, dll)
-        document.select("a[href]").filter { a ->
-            val href = a.attr("href")
-            href.contains("gofile.io") || href.contains("mega.nz") ||
-            href.contains("pixeldrain") || href.contains("mediafire") ||
-            href.contains("acefile")
-        }.forEach { a ->
+        // Gofile download link — perlu guest token dulu
+        document.select("a[href*=gofile.io]").forEach { a ->
             val href = a.attr("href").ifBlank { null } ?: return@forEach
-            loadExtractor(fixUrl(href), "$mainUrl/", subtitleCallback, callback)
+            extractGofile(href, callback)
         }
 
         return true
     }
 
-    private suspend fun extractBloggerVideo(
-        iframeSrc: String,
-        referer: String,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        val token = Regex("[?&]token=([^&]+)").find(iframeSrc)
-            ?.groupValues?.getOrNull(1) ?: return
+    private suspend fun extractGofile(url: String, callback: (ExtractorLink) -> Unit) {
+        try {
+            // Step 1: guest token
+            val tokenResp = app.post("https://api.gofile.io/accounts/guest")
+                .parsedSafe<GofileTokenResponse>()
+            val token = tokenResp?.data?.token ?: return
 
-        val freq = "[[[\"WcwnYd\",\"[\\\"" + token + "\\\",\\\"\\\",0]\",null,\"generic\"]]]"
+            // Step 2: folder ID dari URL gofile.io/d/XXXXX
+            val folderId = Regex("gofile\\.io/d/([^/?&]+)").find(url)
+                ?.groupValues?.getOrNull(1) ?: return
 
-        val response = try {
-            app.post(
-                "https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute",
-                params = mapOf("rpcids" to "WcwnYd", "rt" to "c"),
-                data = mapOf("f.req" to freq, "" to ""),
-                referer = iframeSrc,
-                headers = mapOf(
-                    "Content-Type" to "application/x-www-form-urlencoded;charset=UTF-8",
-                    "X-Same-Domain" to "1"
+            // Step 3: fetch content
+            val content = app.get(
+                "https://api.gofile.io/contents/$folderId?wt=4fd6sg89d7s6",
+                headers = mapOf("Authorization" to "Bearer $token")
+            ).parsedSafe<GofileContentResponse>()
+
+            // Step 4: tiap file = 1 kualitas
+            // Nama file: "Ikoku Nikki - 10.720.mp4" → quality = "720"
+            content?.data?.children?.values?.forEach { file ->
+                val directLink = file.link ?: return@forEach
+                val name = file.name ?: return@forEach
+
+                // Parse quality dari nama file: ambil angka sebelum .mp4/.mkv
+                val qualityStr = Regex("\\.(1K|\\d{3,4})\\.[^.]+$", RegexOption.IGNORE_CASE)
+                    .find(name)?.groupValues?.getOrNull(1) ?: "?"
+                val quality = when (qualityStr.uppercase()) {
+                    "1K" -> 1080
+                    else -> qualityStr.toIntOrNull()
+                        ?: com.lagradost.cloudstream3.utils.Qualities.Unknown.value
+                }
+
+                callback.invoke(
+                    newExtractorLink(
+                        "Gofile",
+                        "Gofile ${quality}p",
+                        directLink,
+                    ) {
+                        this.referer = ""
+                        this.quality = quality
+                        this.headers = mapOf("Authorization" to "Bearer $token")
+                    }
                 )
-            ).text
-        } catch (e: Exception) { return }
-
-        val decoded = response
-            .replace("\\u003d", "=")
-            .replace("\\u0026", "&")
-            .replace("\\/", "/")
-
-        val videoUrl = Regex("https://r[\\w.%-]+googlevideo\\.com/videoplayback[\\w.=&%+,;:@!*/?~-]+")
-            .find(decoded)?.value ?: return
-
-        callback.invoke(
-            newExtractorLink(
-                source = "Blogger",
-                name = "Blogger",
-                url = videoUrl,
-            ) {
-                this.referer = "https://www.blogger.com/"
-                this.quality = com.lagradost.cloudstream3.utils.Qualities.Unknown.value
             }
-        )
+        } catch (e: Exception) { }
     }
+
+    data class GofileTokenResponse(
+        @com.fasterxml.jackson.annotation.JsonProperty("data") val data: GofileTokenData?
+    )
+    data class GofileTokenData(
+        @com.fasterxml.jackson.annotation.JsonProperty("token") val token: String?
+    )
+    data class GofileContentResponse(
+        @com.fasterxml.jackson.annotation.JsonProperty("data") val data: GofileContentData?
+    )
+    data class GofileContentData(
+        @com.fasterxml.jackson.annotation.JsonProperty("children") val children: Map<String, GofileFile>?
+    )
+    data class GofileFile(
+        @com.fasterxml.jackson.annotation.JsonProperty("name") val name: String?,
+        @com.fasterxml.jackson.annotation.JsonProperty("link") val link: String?
+    )
 }

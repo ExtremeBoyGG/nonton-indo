@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 
 class Otakudesu : MainAPI() {
@@ -114,19 +115,19 @@ class Otakudesu : MainAPI() {
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
                 val serverName = a.text().trim()
 
-                // Buat callback wrapper yang override quality
                 val qualityCallback = { link: ExtractorLink ->
                     callback(
-                        ExtractorLink(
+                        newExtractorLink(
                             link.source,
                             "$serverName ${qualityText.substringAfter(" ")}",
                             link.url,
-                            link.referer,
-                            quality,
-                            link.isM3u8,
-                            link.headers,
-                            link.extractorData
-                        )
+                        ) {
+                            this.referer = link.referer
+                            this.quality = quality
+                            this.isM3u8 = link.isM3u8
+                            this.headers = link.headers
+                            this.extractorData = link.extractorData
+                        }
                     )
                 }
                 loadExtractor(fixUrl(href), data, subtitleCallback, qualityCallback)
