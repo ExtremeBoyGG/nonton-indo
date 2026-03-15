@@ -95,21 +95,53 @@ class Otakudesu : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data, headers = ua).document
 
-        // Ambil semua iframe yang ada di halaman — bisa lebih dari satu (per kualitas)
-        val iframes = document.select("div#pembed iframe, div.player-embed iframe, div.responsive-embed-stream iframe")
-        iframes.forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-            if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
-        }
+        // Iframe streaming — bisa ada beberapa per kualitas
+        document.select("div#pembed iframe, div.player-embed iframe, div.responsive-embed-stream iframe")
+            .forEach { iframe ->
+                val src = iframe.attr("src").ifBlank { null } ?: return@forEach
+                if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+            }
 
-        // Fallback: download links
-        document.select("div.download li, div.downloadst li").forEach { el ->
-            el.select("a").forEach { a ->
+        // Download links — struktur:
+        // <li><strong>Mp4 720p</strong> <a href="...">ODFiles</a> <a href="...">Pdrain</a> ...</li>
+        document.select("div.download li").forEach { li ->
+            // Quality dari <strong> — format: "Mp4 360p", "MKV 720p", "Mp4 480p", dll
+            val qualityText = li.selectFirst("strong")?.text() ?: ""
+            val quality = parseQuality(qualityText)
+            val formatLabel = if (qualityText.contains("MKV", true)) "MKV" else "MP4"
+
+            li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
-                loadExtractor(fixUrl(href), data, subtitleCallback, callback)
+                val serverName = a.text().trim()
+
+                loadExtractor(fixUrl(href), data, subtitleCallback) { link ->
+                    callback.invoke(
+                        ExtractorLink(
+                            source = link.name,
+                            // Tampilkan: "Pdrain - MP4 720p" biar mudah dibedakan
+                            name = "$serverName - $formatLabel ${getQualityLabel(quality)}",
+                            url = link.url,
+                            referer = link.referer,
+                            quality = quality,
+                            type = link.type,
+                            headers = link.headers,
+                            extractorData = link.extractorData
+                        )
+                    )
+                }
             }
         }
 
         return true
+    }
+
+    private fun parseQuality(str: String): Int {
+        return Regex("(\\d{3,4})p", RegexOption.IGNORE_CASE).find(str)
+            ?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: com.lagradost.cloudstream3.utils.Qualities.Unknown.value
+    }
+
+    private fun getQualityLabel(quality: Int): String {
+        return if (quality > 0) "${quality}p" else "?"
     }
 }

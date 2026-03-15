@@ -97,10 +97,16 @@ class Oploverz : MainAPI() {
         val document = app.get(data).document
 
         // Iframe Blogger langsung ada di static HTML di div#pembed
-        // <iframe src="https://www.blogger.com/video.g?token=...">
         document.select("div#pembed iframe, div.player-embed iframe, div.video-content iframe").forEach { iframe ->
             val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-            if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+            if (!src.startsWith("http")) return@forEach
+
+            // Handle Blogger video langsung tanpa custom extractor
+            if (src.contains("blogger.com/video.g")) {
+                extractBloggerVideo(src, data, callback)
+            } else {
+                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+            }
         }
 
         // Fallback: download link (gofile, mega, dll)
@@ -108,12 +114,55 @@ class Oploverz : MainAPI() {
             val href = a.attr("href")
             href.contains("gofile.io") || href.contains("mega.nz") ||
             href.contains("pixeldrain") || href.contains("mediafire") ||
-            href.contains("acefile") || href.contains("upstream")
+            href.contains("acefile")
         }.forEach { a ->
             val href = a.attr("href").ifBlank { null } ?: return@forEach
             loadExtractor(fixUrl(href), "$mainUrl/", subtitleCallback, callback)
         }
 
         return true
+    }
+
+    private suspend fun extractBloggerVideo(
+        iframeSrc: String,
+        referer: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val token = Regex("[?&]token=([^&]+)").find(iframeSrc)
+            ?.groupValues?.getOrNull(1) ?: return
+
+        val freq = "[[[\"WcwnYd\",\"[\\\"" + token + "\\\",\\\"\\\",0]\",null,\"generic\"]]]"
+
+        val response = try {
+            app.post(
+                "https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute",
+                params = mapOf("rpcids" to "WcwnYd", "rt" to "c"),
+                data = mapOf("f.req" to freq, "" to ""),
+                referer = iframeSrc,
+                headers = mapOf(
+                    "Content-Type" to "application/x-www-form-urlencoded;charset=UTF-8",
+                    "X-Same-Domain" to "1"
+                )
+            ).text
+        } catch (e: Exception) { return }
+
+        val decoded = response
+            .replace("\\u003d", "=")
+            .replace("\\u0026", "&")
+            .replace("\\/", "/")
+
+        val videoUrl = Regex("https://r[\\w.%-]+googlevideo\\.com/videoplayback[\\w.=&%+,;:@!*/?~-]+")
+            .find(decoded)?.value ?: return
+
+        callback.invoke(
+            ExtractorLink(
+                source = "Blogger",
+                name = "Blogger",
+                url = videoUrl,
+                referer = "https://www.blogger.com/",
+                quality = com.lagradost.cloudstream3.utils.Qualities.Unknown.value,
+                isM3u8 = false
+            )
+        )
     }
 }
