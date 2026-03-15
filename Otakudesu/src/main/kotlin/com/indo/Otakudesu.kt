@@ -95,19 +95,41 @@ class Otakudesu : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data, headers = ua).document
 
-        // Iframe streaming — bisa ada beberapa per kualitas
+        // Iframe streaming
         document.select("div#pembed iframe, div.player-embed iframe, div.responsive-embed-stream iframe")
             .forEach { iframe ->
                 val src = iframe.attr("src").ifBlank { null } ?: return@forEach
                 if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
 
-        // Download links — struktur:
-        // <li><strong>Mp4 720p</strong> <a href="...">ODFiles</a> <a href="...">Pdrain</a> ...</li>
+        // Download links dengan quality dari <strong>
+        // Wrap callback untuk inject quality dari HTML ke ExtractorLink
         document.select("div.download li").forEach { li ->
+            val qualityText = li.selectFirst("strong")?.text() ?: ""
+            val quality = Regex("(\\d{3,4})p", RegexOption.IGNORE_CASE)
+                .find(qualityText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: com.lagradost.cloudstream3.utils.Qualities.Unknown.value
+
             li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
-                loadExtractor(fixUrl(href), data, subtitleCallback, callback)
+                val serverName = a.text().trim()
+
+                // Buat callback wrapper yang override quality
+                val qualityCallback = { link: ExtractorLink ->
+                    callback(
+                        ExtractorLink(
+                            link.source,
+                            "$serverName ${qualityText.substringAfter(" ")}",
+                            link.url,
+                            link.referer,
+                            quality,
+                            link.isM3u8,
+                            link.headers,
+                            link.extractorData
+                        )
+                    )
+                }
+                loadExtractor(fixUrl(href), data, subtitleCallback, qualityCallback)
             }
         }
 
