@@ -16,7 +16,7 @@ class Pahe : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     // Pahe perlu User-Agent dan headers yang proper untuk bypass Cloudflare
-    override val headers = mapOf(
+    private val ua = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language" to "en-US,en;q=0.5",
@@ -28,7 +28,7 @@ class Pahe : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = app.get(request.data + page, headers = headers).document
+        val doc = app.get(request.data + page, headers = ua).document
         val home = doc.select("article, div.post-item").mapNotNull { article ->
             val a = article.selectFirst("h1 a, h2 a, h3 a, a[href*=pahe.ink]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -40,7 +40,7 @@ class Pahe : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = app.get("$mainUrl/?s=$query", headers = headers).document
+        val doc = app.get("$mainUrl/?s=$query", headers = ua).document
         return doc.select("article, div.post-item").mapNotNull { article ->
             val a = article.selectFirst("h1 a, h2 a, h3 a") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -51,7 +51,7 @@ class Pahe : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url, headers = headers).document
+        val doc = app.get(url, headers = ua).document
 
         val title = doc.selectFirst("h1.entry-title, h1")?.text()?.trim()
             ?.replace(Regex("\\s*\\(\\d{4}\\).*WEB.*", RegexOption.IGNORE_CASE), "")
@@ -74,7 +74,7 @@ class Pahe : MainAPI() {
     }
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        val doc = app.get(data, headers = headers).document
+        val doc = app.get(data, headers = ua).document
 
         // Pahe menyediakan link download langsung (GDrive, Mega, dll)
         // Bukan streaming tradisional — ambil semua link download

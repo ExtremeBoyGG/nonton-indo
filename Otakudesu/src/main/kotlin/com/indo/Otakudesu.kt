@@ -15,7 +15,7 @@ class Otakudesu : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    override val headers = mapOf(
+    private val ua = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8"
@@ -26,7 +26,7 @@ class Otakudesu : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data + page, headers = headers).document
+        val document = app.get(request.data + page, headers = ua).document
         val home = document.select("div.venz ul li, div.detpost, div.thumb").mapNotNull { el ->
             val a = el.selectFirst("a[href]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -40,7 +40,7 @@ class Otakudesu : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/?s=$query&post_type=anime", headers = headers).document
+        val document = app.get("$mainUrl/?s=$query&post_type=anime", headers = ua).document
         return document.select("ul.chivsrc li, div.venz ul li").mapNotNull { el ->
             val a = el.selectFirst("a[href]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -53,7 +53,7 @@ class Otakudesu : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = headers).document
+        val document = app.get(url, headers = ua).document
 
         val title = document.selectFirst("h1.entry-title, h1, div.infozingle b:contains(Judul)")
             ?.let {
@@ -101,7 +101,7 @@ class Otakudesu : MainAPI() {
     }
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        val document = app.get(data, headers = headers).document
+        val document = app.get(data, headers = ua).document
 
         val iframes = document.select("iframe").mapNotNull { it.attr("src").ifBlank { null }?.let { fixUrl(it) } }
         for (iframe in iframes) {
@@ -117,7 +117,7 @@ class Otakudesu : MainAPI() {
                     val decoded = String(Base64.getDecoder().decode(encodedData), Charsets.UTF_8)
                     val iframeSrc = Regex("""src="([^"]+)"""").find(decoded)?.groupValues?.getOrNull(1)
                     if (iframeSrc != null) loadExtractor(fixUrl(iframeSrc), data, subtitleCallback, callback)
-                } catch (_: Exception) { }
+                } catch (e: Exception) { }
             }
         }
 

@@ -44,7 +44,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/src
           chmod +x gradlew
-          ./gradlew make makePluginsJson
+          ./gradlew make makePluginsJson --info 2>&1 | tail -100
           cp **/build/*.cs3 $GITHUB_WORKSPACE/builds/
           cp build/plugins.json $GITHUB_WORKSPACE/builds/
 
