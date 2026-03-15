@@ -97,7 +97,7 @@ class Otakudesu : MainAPI() {
             val name = el.text().trim()
             val episode = Regex("episode[\\s-]*(\\d+[.,]?\\d*)", RegexOption.IGNORE_CASE)
                 .find(name)?.groupValues?.getOrNull(1)?.replace(",", ".")?.toFloatOrNull()
-            Episode(href, name, episode = episode?.toInt())
+            newEpisode(href) { this.name = name; this.episode = episode?.toInt() }
         }.reversed()
 
         return newAnimeLoadResponse(title, url, TvType.Anime) {

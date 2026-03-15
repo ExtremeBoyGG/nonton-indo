@@ -113,7 +113,7 @@ class Oploverz : MainAPI() {
                 val name = a.text().trim()
                 val episode = Regex("episode[\\s-]*(\\d+[.,]?\\d*)", RegexOption.IGNORE_CASE)
                     .find(name)?.groupValues?.getOrNull(1)?.replace(",", ".")?.toFloatOrNull()
-                Episode(href, name, episode = episode?.toInt())
+                newEpisode(href) { this.name = name; this.episode = episode?.toInt() }
             }
 
         val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), year, true)

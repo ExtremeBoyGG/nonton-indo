@@ -52,8 +52,10 @@ class Idlix : MainAPI() {
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val doc = app.get(data).document
-        doc.select("iframe").mapNotNull { it.attr("src").ifBlank { null } } }.forEach {
-            loadExtractor(fixUrl(it), data, subtitleCallback, callback)
+        doc.select("iframe").mapNotNull { el ->
+            el.attr("src").ifBlank { null }
+        }.forEach { src ->
+            loadExtractor(fixUrl(src), data, subtitleCallback, callback)
         }
         return true
     }

@@ -110,7 +110,7 @@ class AnimeIndo : MainAPI() {
             val name = el.text().trim()
             val episode = Regex("episode[\\s-]*(\\d+[.,]?\\d*)", RegexOption.IGNORE_CASE)
                 .find(name)?.groupValues?.getOrNull(1)?.replace(",", ".")?.toFloatOrNull()
-            Episode(fixUrl(href), name, episode = episode?.toInt())
+            newEpisode(fixUrl(href)) { this.name = name; this.episode = episode?.toInt() }
         }.sortedByDescending { it.episode }
 
         val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), year, true)

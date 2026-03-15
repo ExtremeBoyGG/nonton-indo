@@ -45,7 +45,7 @@ class Animasu : MainAPI() {
             val href = it.attr("href") ?: return@mapNotNull null
             val name = it.text().trim()
             val ep = Regex("episode[\\s-]*(\\d+)", RegexOption.IGNORE_CASE).find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            Episode(href, name, episode = ep)
+            newEpisode(href) { this.name = name; this.episode = ep }
         }.reversed()
         return newAnimeLoadResponse(title, url, TvType.Anime) {
             posterUrl = poster; plot = description; addEpisodes(DubStatus.Subbed, episodes)
@@ -54,8 +54,10 @@ class Animasu : MainAPI() {
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val doc = app.get(data).document
-        doc.select("iframe").mapNotNull { it.attr("src").ifBlank { null } } }.forEach {
-            loadExtractor(fixUrl(it), data, subtitleCallback, callback)
+        doc.select("iframe").mapNotNull { el ->
+            el.attr("src").ifBlank { null }
+        }.forEach { src ->
+            loadExtractor(fixUrl(src), data, subtitleCallback, callback)
         }
         return true
     }
