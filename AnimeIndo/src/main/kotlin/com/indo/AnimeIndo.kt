@@ -14,98 +14,100 @@ class AnimeIndo : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    // AnimeIndo homepage: link langsung ke episode (bukan series page)
-    // Format URL episode: anime-indo.lol/judul-anime-episode-1/
-    // Format URL anime:   anime-indo.lol/anime/judul-anime/
+    // Homepage menampilkan episode terbaru
+    // Struktur: <a href="/judul-episode-N/"><div class="list-anime">
+    //               <img data-original="..."><p>Judul</p><span class="eps">N</span>
+    //           </div></a>
     override val mainPage = mainPageOf(
         "$mainUrl/page/" to "Episode Terbaru"
     )
 
-    private fun isEpisodeUrl(url: String) = url.contains("-episode-", ignoreCase = true)
-    private fun isAnimeUrl(url: String) = url.contains("/anime/")
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data + page).document
 
-        val home = document.select("a[href]").filter { a ->
-            val href = a.attr("href")
-            // Ambil link episode atau anime, skip navigasi
-            (isEpisodeUrl(href) || isAnimeUrl(href)) &&
-            href.contains(mainUrl) &&
-            a.selectFirst("img") != null
-        }.mapNotNull { a ->
+        // Selector: a yang mengandung div.list-anime
+        val home = document.select("div.menu a:has(div.list-anime)").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val img = a.selectFirst("img") ?: return@mapNotNull null
-            // Judul dari img alt
-            val title = img.attr("alt").trim().ifBlank { null }
+            val inner = a.selectFirst("div.list-anime") ?: return@mapNotNull null
+
+            // Judul ada di <p>, bukan <h2>/<h3>
+            val title = inner.selectFirst("p")?.text()?.trim()?.ifBlank { null }
                 ?: return@mapNotNull null
 
-            // Kalau episode URL, convert ke anime URL untuk scraping
-            val animeUrl = if (isEpisodeUrl(href)) {
-                // Coba cari link ke halaman anime di sekitarnya
-                val seriesLink = a.parent()?.selectFirst("a[href*=/anime/]")?.attr("href")
-                seriesLink ?: href // fallback ke episode URL
-            } else href
+            // Gambar pakai data-original (lazy load)
+            val poster = inner.selectFirst("img")?.let { img ->
+                img.attr("data-original").ifBlank { null } ?: img.attr("src").takeUnless { it.contains("loading") }
+            }
+
+            val epNum = inner.selectFirst("span.eps")?.text()?.trim()?.toIntOrNull()
+
+            // Ini link ke episode — kita tampilkan sebagai anime search result
+            // URL episode: /judul-anime-episode-N/
+            // Kita perlu convert ke URL anime: /anime/judul-anime/
+            val animeUrl = episodeToAnimeUrl(href)
 
             newAnimeSearchResponse(title, fixUrl(animeUrl), TvType.Anime) {
-                this.posterUrl = img.attr("src").takeUnless { it.contains("loading") }
+                this.posterUrl = poster
+                addSub(epNum)
             }
         }.distinctBy { it.url }
 
         return newHomePageResponse(request.name, home)
     }
 
+    // Convert URL episode ke URL anime
+    // /jigokuraku-2nd-season-episode-10/ → /anime/jigokuraku-2nd-season/
+    private fun episodeToAnimeUrl(url: String): String {
+        val slug = url.trimEnd('/').substringAfterLast("/")
+        val animeSlug = Regex("-episode-\\d+.*$", RegexOption.IGNORE_CASE).replace(slug, "")
+        return "$mainUrl/anime/$animeSlug/"
+    }
+
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/?s=$query").document
-        return document.select("a[href]").filter { a ->
-            a.selectFirst("img[alt]") != null && a.attr("href").contains(mainUrl)
-        }.mapNotNull { a ->
+        val document = app.get("$mainUrl/search.php?q=$query").document
+        return document.select("div.menu a:has(div.list-anime)").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = a.selectFirst("img")?.attr("alt")?.trim()?.ifBlank { null }
-                ?: a.text().trim().ifBlank { null }
-                ?: return@mapNotNull null
-            newAnimeSearchResponse(title, fixUrl(href), TvType.Anime)
+            val inner = a.selectFirst("div.list-anime") ?: return@mapNotNull null
+            val title = inner.selectFirst("p")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
+            val poster = inner.selectFirst("img")?.attr("data-original")?.ifBlank { null }
+            newAnimeSearchResponse(title, fixUrl(href), TvType.Anime) { this.posterUrl = poster }
         }.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+        // Kalau URL episode, redirect ke halaman anime
+        val animeUrl = if (url.contains("/anime/")) url else episodeToAnimeUrl(url)
+        val document = app.get(animeUrl).document
 
-        val title = document.selectFirst("h1, h2.title, .entry-title, h2")?.text()?.trim()
+        val title = document.selectFirst("h2")?.text()?.trim()
             ?.replace(Regex("\\s*Subtitle\\s*Indonesia.*", RegexOption.IGNORE_CASE), "")
-            ?.replace(Regex("\\s*Episode.*", RegexOption.IGNORE_CASE), "")
             ?.trim()
             ?: throw ErrorLoadingException("Title not found")
 
-        val poster = document.selectFirst("img[src*=upload], img.poster, div.poster img")
-            ?.attr("src")?.takeUnless { it.contains("loading") }
+        // Gambar di halaman anime: td.vithumb img
+        val poster = document.selectFirst("td.vithumb img, .detail img")
+            ?.attr("src")?.ifBlank { null }
 
-        val description = document.selectFirst("div.sinopsis, div.desc, p.description")?.text()?.trim()
-        val genres = document.select("a[href*=genre]").map { it.text() }.filter { it.isNotBlank() }
-        val year = document.selectFirst("span:contains(Tahun), span:contains(Year)")
-            ?.text()?.let { Regex("\\b(20\\d{2})\\b").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+        val description = document.selectFirst("p.des, div.videsc p")?.text()?.trim()
 
-        // Cari semua link episode dari halaman ini
-        val episodes = document.select("a[href]").filter { el ->
-            isEpisodeUrl(el.attr("href")) && el.attr("href").contains(mainUrl)
-        }.mapNotNull { el ->
-            val href = el.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val epText = el.text().trim().ifBlank {
-                el.selectFirst("img")?.attr("alt") ?: return@mapNotNull null
-            }
-            val ep = Regex("episode[\\s-]*(\\d+)", RegexOption.IGNORE_CASE)
-                .find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                ?: Regex("-(\\d+)/?$").find(href.trimEnd('/'))?.groupValues?.getOrNull(1)?.toIntOrNull()
-            newEpisode(fixUrl(href)) { this.name = epText; this.episode = ep }
-        }.distinctBy { it.data }.sortedBy { it.episode }
+        val genres = document.select("div.detail li a").map { it.text() }.filter { it.isNotBlank() }
 
-        val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), year, true)
+        // Episode list: div.ep a
+        // Struktur: <div class="ep"><a href="/judul-episode-1/">1</a><a href="/judul-episode-2/">2</a></div>
+        val episodes = document.select("div.ep a").mapNotNull { a ->
+            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+            val epText = a.text().trim()
+            val ep = epText.toIntOrNull()
+                ?: Regex("(\\d+)").find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            newEpisode(fixUrl(href)) { this.name = "Episode $epText"; this.episode = ep }
+        }.sortedBy { it.episode }
 
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
+        val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), null, true)
+
+        return newAnimeLoadResponse(title, animeUrl, TvType.Anime) {
             engName = title
             posterUrl = tracker?.image ?: poster
             backgroundPosterUrl = tracker?.cover
-            this.year = year
             addEpisodes(DubStatus.Subbed, episodes)
             plot = description
             this.tags = genres
@@ -114,26 +116,31 @@ class AnimeIndo : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         val document = app.get(data).document
 
-        // Cari iframe
-        document.select("iframe[src]").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
+        // Cari iframe player — ada di #tontonin atau div.nonton iframe
+        document.select("#tontonin, div.nonton iframe, iframe[src]").forEach { el ->
+            val src = when {
+                el.tagName() == "iframe" -> el.attr("src")
+                else -> el.attr("src")
+            }.ifBlank { null } ?: return@forEach
             if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
         }
 
-        // Cari video URL di script tags
-        document.select("script").forEach { script ->
-            val html = script.html()
-            Regex("""["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']""")
-                .findAll(html).forEach { match ->
-                    loadExtractor(match.groupValues[1], data, subtitleCallback, callback)
-                }
-            Regex("""["'](https?://(?:embed\.|player\.|stream\.|video\.)[^"']{10,})["']""")
-                .findAll(html).forEach { match ->
-                    loadExtractor(match.groupValues[1], data, subtitleCallback, callback)
-                }
+        // Cari server buttons — struktur AnimeIndo pakai form input.server
+        // <input class="server" type="button" value="Server 1" onClick="ganti('URL')">
+        document.select("input.server[onclick], .server[onclick]").forEach { el ->
+            val onclick = el.attr("onclick")
+            // Format: ganti('https://...')  atau  nonton('https://...')
+            val url = Regex("""(?:ganti|nonton)\(['"]([^'"]+)['"]\)""").find(onclick)
+                ?.groupValues?.getOrNull(1)?.ifBlank { null } ?: return@forEach
+            loadExtractor(fixUrl(url), data, subtitleCallback, callback)
         }
 
         return true
