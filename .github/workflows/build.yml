@@ -50,25 +50,21 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/builds
           python3 -c "
-import json
-import os
+          import json
+          import os
+          if os.path.exists('plugins.json'):
+            with open('plugins.json', 'r') as f:
+              data = json.load(f)
+          else:
+            data = []
 
-# Read current plugins.json if exists, otherwise create empty array
-if os.path.exists('plugins.json'):
-    with open('plugins.json', 'r') as f:
-        data = json.load(f)
-else:
-    data = []
+          existing = {entry.get('name'): entry for entry in data if isinstance(entry, dict)}
 
-# Map existing entries by name for easy lookup
-existing = {entry.get('name'): entry for entry in data if isinstance(entry, dict)}
-
-# Process each .cs3 file built
-for cs3_file in os.listdir('.'):
-    if cs3_file.endswith('.cs3'):
-        name = cs3_file[:-4]  # Remove .cs3 extension
-        filepath = os.path.join('.', cs3_file)
-        try:
+          for cs3_file in os.listdir('.'):
+            if cs3_file.endswith('.cs3'):
+              name = cs3_file[:-4]  # Remove .cs3 extension
+              filepath = os.path.join('.', cs3_file)
+              try:
             size = os.path.getsize(filepath)
             # Update or create entry
             if name in existing:
