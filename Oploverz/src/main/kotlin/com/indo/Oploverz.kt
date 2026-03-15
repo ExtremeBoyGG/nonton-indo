@@ -3,7 +3,6 @@ package com.indo
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
-import com.lagradost.cloudstream3.utils.AppUtils.parsedSafe
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -118,7 +117,7 @@ class Oploverz : MainAPI() {
         try {
             // Step 1: guest token
             val tokenResp = app.post("https://api.gofile.io/accounts/guest")
-                .parsedSafe<GofileTokenResponse>()
+                .parseJson<GofileTokenResponse>()
             val token = tokenResp?.data?.token ?: return
 
             // Step 2: folder ID dari URL gofile.io/d/XXXXX
@@ -129,7 +128,7 @@ class Oploverz : MainAPI() {
             val content = app.get(
                 "https://api.gofile.io/contents/$folderId?wt=4fd6sg89d7s6",
                 headers = mapOf("Authorization" to "Bearer $token")
-            ).parsedSafe<GofileContentResponse>()
+            ).parseJson<GofileContentResponse>()
 
             // Step 4: tiap file = 1 kualitas
             // Nama file: "Ikoku Nikki - 10.720.mp4" → quality = "720"

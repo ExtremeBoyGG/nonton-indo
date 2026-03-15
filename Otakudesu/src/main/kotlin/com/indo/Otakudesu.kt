@@ -104,7 +104,6 @@ class Otakudesu : MainAPI() {
             }
 
         // Download links dengan quality dari <strong>
-        // Wrap callback untuk inject quality dari HTML ke ExtractorLink
         document.select("div.download li").forEach { li ->
             val qualityText = li.selectFirst("strong")?.text() ?: ""
             val quality = Regex("(\\d{3,4})p", RegexOption.IGNORE_CASE)
@@ -113,24 +112,18 @@ class Otakudesu : MainAPI() {
 
             li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
-                val serverName = a.text().trim()
-
-                val qualityCallback = { link: ExtractorLink ->
-                    callback(
-                        newExtractorLink(
-                            link.source,
-                            "$serverName ${qualityText.substringAfter(" ")}",
-                            link.url,
-                        ) {
-                            this.referer = link.referer
-                            this.quality = quality
-                            this.isM3u8 = link.isM3u8
-                            this.headers = link.headers
-                            this.extractorData = link.extractorData
-                        }
-                    )
+                // Pass quality langsung — extractor akan gunakan quality ini
+                loadExtractor(fixUrl(href), data, subtitleCallback) { link ->
+                    @Suppress("DEPRECATION")
+                    callback(com.lagradost.cloudstream3.utils.ExtractorLink(
+                        link.source,
+                        "${a.text().trim()} ${qualityText.substringAfter(" ")}",
+                        link.url,
+                        link.referer,
+                        quality,
+                        link.isM3u8
+                    ))
                 }
-                loadExtractor(fixUrl(href), data, subtitleCallback, qualityCallback)
             }
         }
 
