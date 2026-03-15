@@ -8,14 +8,13 @@ new_entry = {
     'repositories': ['https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/plugins.json']
 }
 
-found = False
-for i, entry in enumerate(data):
-    if entry.get('name') == 'nonton-indo':
-        data[i] = new_entry
-        found = True
-        break
-if not found:
-    data.append(new_entry)
+# Filter out invalid entries (strings, None, dll) dan entry lama dengan nama sama
+data = [
+    entry for entry in data
+    if isinstance(entry, dict) and entry.get('name') != 'nonton-indo'
+]
+
+data.append(new_entry)
 
 with open('repo.json', 'w') as f:
     json.dump(data, f, indent=2)
