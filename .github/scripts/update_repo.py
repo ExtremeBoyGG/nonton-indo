@@ -6,7 +6,7 @@ data = {
     "description": "CloudStream 3 Extensions untuk Situs Streaming Indonesia",
     "manifestVersion": 1,
     "pluginLists": [
-        "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/main/plugins.json"
+        "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/plugins.json"
     ]
 }
 
