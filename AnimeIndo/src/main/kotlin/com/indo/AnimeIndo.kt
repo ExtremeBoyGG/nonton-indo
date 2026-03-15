@@ -75,30 +75,37 @@ class AnimeIndo : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        // Kalau URL episode, redirect ke halaman anime
-        val animeUrl = if (url.contains("/anime/")) url else episodeToAnimeUrl(url)
+        // Kalau URL episode, ambil URL anime dari link "Semua Episode" di halaman
+        val isEpisode = !url.contains("/anime/")
+        val episodeDoc = if (isEpisode) app.get(url).document else null
+
+        // Dari HTML: <a href="/anime/ikoku-nikki/">Semua Episode</a>
+        val animeUrl = episodeDoc?.selectFirst("div.navi a[href*=/anime/]")?.attr("href")
+            ?.let { fixUrl(it) }
+            ?: if (url.contains("/anime/")) url
+            else episodeToAnimeUrl(url)
+
         val document = app.get(animeUrl).document
 
-        val title = document.selectFirst("h2")?.text()?.trim()
+        val title = document.selectFirst("h1.title, h2.title, h1, h2")?.text()?.trim()
             ?.replace(Regex("\\s*Subtitle\\s*Indonesia.*", RegexOption.IGNORE_CASE), "")
+            ?.replace(Regex("\\s*Sub\\s*Indo.*", RegexOption.IGNORE_CASE), "")
             ?.trim()
             ?: throw ErrorLoadingException("Title not found")
 
-        // Gambar di halaman anime: td.vithumb img
-        val poster = document.selectFirst("td.vithumb img, .detail img")
-            ?.attr("src")?.ifBlank { null }
+        val poster = document.selectFirst("div.detail img, td.vithumb img")
+            ?.attr("src")?.ifBlank { null }?.let { fixUrl(it) }
 
-        val description = document.selectFirst("p.des, div.videsc p")?.text()?.trim()
-
+        val description = document.selectFirst("div.detail p, p.des")?.text()?.trim()
         val genres = document.select("div.detail li a").map { it.text() }.filter { it.isNotBlank() }
 
-        // Episode list: div.ep a
-        // Struktur: <div class="ep"><a href="/judul-episode-1/">1</a><a href="/judul-episode-2/">2</a></div>
-        val episodes = document.select("div.ep a").mapNotNull { a ->
+        // Episode list: div.ep a — teks berisi nomor episode
+        val episodes = document.select("div.ep a[href]").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             val epText = a.text().trim()
             val ep = epText.toIntOrNull()
-                ?: Regex("(\\d+)").find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: Regex("(\\d+)").find(href.trimEnd('/').substringAfterLast("/"))
+                    ?.groupValues?.getOrNull(1)?.toIntOrNull()
             newEpisode(fixUrl(href)) { this.name = "Episode $epText"; this.episode = ep }
         }.sortedBy { it.episode }
 
@@ -124,23 +131,33 @@ class AnimeIndo : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
-        // Cari iframe player — ada di #tontonin atau div.nonton iframe
-        document.select("#tontonin, div.nonton iframe, iframe[src]").forEach { el ->
-            val src = when {
-                el.tagName() == "iframe" -> el.attr("src")
-                else -> el.attr("src")
-            }.ifBlank { null } ?: return@forEach
-            if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+        // Kumpulkan semua server URLs dari data-video attribute
+        // Struktur: <a class="server" data-video="URL">Nama Server</a>
+        val serverUrls = mutableListOf<String>()
+
+        // Default server dari iframe src
+        document.selectFirst("iframe#tontonin")?.attr("src")?.ifBlank { null }?.let {
+            serverUrls.add(it)
         }
 
-        // Cari server buttons — struktur AnimeIndo pakai form input.server
-        // <input class="server" type="button" value="Server 1" onClick="ganti('URL')">
-        document.select("input.server[onclick], .server[onclick]").forEach { el ->
-            val onclick = el.attr("onclick")
-            // Format: ganti('https://...')  atau  nonton('https://...')
-            val url = Regex("""(?:ganti|nonton)\(['"]([^'"]+)['"]\)""").find(onclick)
-                ?.groupValues?.getOrNull(1)?.ifBlank { null } ?: return@forEach
-            loadExtractor(fixUrl(url), data, subtitleCallback, callback)
+        // Server tambahan dari a.server[data-video]
+        document.select("a.server[data-video]").forEach { a ->
+            val url = a.attr("data-video").ifBlank { null } ?: return@forEach
+            if (!serverUrls.contains(url)) serverUrls.add(url)
+        }
+
+        // Load semua server
+        serverUrls.forEach { url ->
+            val fullUrl = if (url.startsWith("/")) "$mainUrl$url" else url
+            loadExtractor(fullUrl, data, subtitleCallback, callback)
+        }
+
+        // Download link dari .navi (biasanya GDrive)
+        document.select("div.navi a[href]").forEach { a ->
+            val href = a.attr("href").ifBlank { null } ?: return@forEach
+            if (href.startsWith("http") && !href.contains(mainUrl)) {
+                loadExtractor(href, data, subtitleCallback, callback)
+            }
         }
 
         return true
