@@ -4,7 +4,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.apmap
 
 class Otakudesu : MainAPI() {
     override var mainUrl = "https://otakudesu.blog"
@@ -102,11 +104,33 @@ class Otakudesu : MainAPI() {
                 if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
 
-        // Download links — quality dari <strong>Mp4 720p</strong>
-        document.select("div.download li").forEach { li ->
-            li.select("a[href]").forEach { a ->
-                val href = a.attr("href").ifBlank { null } ?: return@forEach
-                loadExtractor(fixUrl(href), data, subtitleCallback, callback)
+        // Download links dengan quality — pakai apmap agar bisa suspend
+        // Struktur: <li><strong>Mp4 720p</strong><a>ODFiles</a><a>Pdrain</a>...</li>
+        document.select("div.download li").apmap { li ->
+            val qualityText = li.selectFirst("strong")?.text() ?: ""
+            val quality = Regex("(\\d{3,4})p", RegexOption.IGNORE_CASE)
+                .find(qualityText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: com.lagradost.cloudstream3.utils.Qualities.Unknown.value
+
+            li.select("a[href]").apmap { a ->
+                val href = a.attr("href").ifBlank { null } ?: return@apmap
+                val serverName = a.text().trim()
+
+                loadExtractor(fixUrl(href), data, subtitleCallback) { link ->
+                    callback(
+                        newExtractorLink(
+                            link.source,
+                            "$serverName - $qualityText",
+                            link.url,
+                        ) {
+                            this.referer = link.referer
+                            this.quality = quality
+                            this.isM3u8 = link.isM3u8
+                            this.headers = link.headers
+                            this.extractorData = link.extractorData
+                        }
+                    )
+                }
             }
         }
 
