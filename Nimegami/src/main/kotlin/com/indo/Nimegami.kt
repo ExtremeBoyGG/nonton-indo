@@ -2,7 +2,6 @@ package com.indo
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 
 class Nimegami : MainAPI() {
@@ -94,42 +93,13 @@ class Nimegami : MainAPI() {
         val doc = app.get(data, headers = ua).document
 
         // Link download langsung ada di HTML — div.download li atau div.batch-dlcuy li
-        // Struktur: <li><strong>720p</strong><a href="...">Berkasdrive</a><a href="...">Krakenfiles</a></li>
         doc.select("div.download li, div.batch-dlcuy li").forEach { li ->
-            val quality = fixQuality(li.selectFirst("strong")?.text() ?: "")
             li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
-                loadExtractor(fixUrl(href), data, subtitleCallback) { link ->
-                    callback.invoke(
-                        newExtractorLink(
-                            link.name,
-                            "${link.name} (${a.text()})",
-                            link.url,
-                        ) {
-                            this.referer = link.referer
-                            this.quality = quality
-                            this.isM3u8 = link.isM3u8
-                            this.headers = link.headers
-                            this.extractorData = link.extractorData
-                        }
-                    )
-                }
+                loadExtractor(fixUrl(href), data, subtitleCallback, callback)
             }
         }
 
         return true
-    }
-
-    private fun fixQuality(str: String): Int {
-        return when (str.uppercase()) {
-            "4K" -> com.lagradost.cloudstream3.utils.Qualities.P2160.value
-            "1080P", "FULLHD" -> com.lagradost.cloudstream3.utils.Qualities.P1080.value
-            "720P" -> com.lagradost.cloudstream3.utils.Qualities.P720.value
-            "480P" -> com.lagradost.cloudstream3.utils.Qualities.P480.value
-            "360P" -> com.lagradost.cloudstream3.utils.Qualities.P360.value
-            else -> Regex("(\\d{3,4})p?", RegexOption.IGNORE_CASE).find(str)
-                ?.groupValues?.getOrNull(1)?.toIntOrNull()
-                ?: com.lagradost.cloudstream3.utils.Qualities.Unknown.value
-        }
     }
 }
