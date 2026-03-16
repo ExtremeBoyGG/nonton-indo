@@ -112,17 +112,21 @@ class Otakudesu : MainAPI() {
 
             li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
-                // Pass quality langsung — extractor akan gunakan quality ini
+                val serverName = a.text().trim()
                 loadExtractor(fixUrl(href), data, subtitleCallback) { link ->
-                    @Suppress("DEPRECATION")
-                    callback(com.lagradost.cloudstream3.utils.ExtractorLink(
-                        link.source,
-                        "${a.text().trim()} ${qualityText.substringAfter(" ")}",
-                        link.url,
-                        link.referer,
-                        quality,
-                        link.isM3u8
-                    ))
+                    callback(
+                        newExtractorLink(
+                            link.source,
+                            "$serverName ${qualityText.substringAfter(" ")}",
+                            link.url,
+                        ) {
+                            this.referer = link.referer
+                            this.quality = quality
+                            this.isM3u8 = link.isM3u8
+                            this.headers = link.headers
+                            this.extractorData = link.extractorData
+                        }
+                    )
                 }
             }
         }

@@ -2,6 +2,7 @@ package com.indo
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 
 class Nimegami : MainAPI() {
@@ -92,30 +93,43 @@ class Nimegami : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val doc = app.get(data, headers = ua).document
 
-        // 1. Iframe langsung
-        doc.select("iframe[src]").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-            if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
-        }
-
-        // 2. Script tags — video sumber biasanya di variabel JS
-        doc.select("script:not([src])").forEach { script ->
-            val html = script.html()
-            Regex("""(?:file|src|source)\s*[=:]\s*["'](https?://[^"']+)["']""")
-                .findAll(html).forEach { m ->
-                    val u = m.groupValues[1]
-                    if (u.contains(".m3u8") || u.contains(".mp4") || u.contains("embed") || u.contains("stream"))
-                        loadExtractor(u, data, subtitleCallback, callback)
+        // Link download langsung ada di HTML — div.download li atau div.batch-dlcuy li
+        // Struktur: <li><strong>720p</strong><a href="...">Berkasdrive</a><a href="...">Krakenfiles</a></li>
+        doc.select("div.download li, div.batch-dlcuy li").forEach { li ->
+            val quality = fixQuality(li.selectFirst("strong")?.text() ?: "")
+            li.select("a[href]").forEach { a ->
+                val href = a.attr("href").ifBlank { null } ?: return@forEach
+                loadExtractor(fixUrl(href), data, subtitleCallback) { link ->
+                    callback.invoke(
+                        newExtractorLink(
+                            link.name,
+                            "${link.name} (${a.text()})",
+                            link.url,
+                        ) {
+                            this.referer = link.referer
+                            this.quality = quality
+                            this.isM3u8 = link.isM3u8
+                            this.headers = link.headers
+                            this.extractorData = link.extractorData
+                        }
+                    )
                 }
-        }
-
-        // 3. Data attributes
-        doc.select("[data-video], [data-src]").mapNotNull {
-            it.attr("data-video").ifBlank { null } ?: it.attr("data-src").ifBlank { null }
-        }.filter { it.startsWith("http") }.forEach { src ->
-            loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+            }
         }
 
         return true
+    }
+
+    private fun fixQuality(str: String): Int {
+        return when (str.uppercase()) {
+            "4K" -> com.lagradost.cloudstream3.utils.Qualities.P2160.value
+            "1080P", "FULLHD" -> com.lagradost.cloudstream3.utils.Qualities.P1080.value
+            "720P" -> com.lagradost.cloudstream3.utils.Qualities.P720.value
+            "480P" -> com.lagradost.cloudstream3.utils.Qualities.P480.value
+            "360P" -> com.lagradost.cloudstream3.utils.Qualities.P360.value
+            else -> Regex("(\\d{3,4})p?", RegexOption.IGNORE_CASE).find(str)
+                ?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: com.lagradost.cloudstream3.utils.Qualities.Unknown.value
+        }
     }
 }
