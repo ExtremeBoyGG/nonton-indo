@@ -163,7 +163,7 @@ class AnimeIndo : MainAPI() {
                         callback(
                             newExtractorLink(
                                 "AnimeIndo",
-                                "AnimeIndo",
+                                "B-TUBE",
                                 videoSrc
                             ) {
                                 this.quality = Qualities.P1080.value
@@ -171,11 +171,30 @@ class AnimeIndo : MainAPI() {
                             }
                         )
                     }
-                } catch (e: Exception) {
-                    // skip server ini kalau gagal
-                }
+                } catch (_: Exception) {}
+            } else if (fullUrl.contains("xtwap.top")) {
+                // CEPAT server — parse JWPlayer source dari JavaScript
+                try {
+                    val html = app.get(fullUrl).text
+                    val fileMatch = Regex("\"file\"\\s*:\\s*\"([^\"]+)\"").find(html)
+                    val filePath = fileMatch?.groupValues?.getOrNull(1)
+                    if (!filePath.isNullOrBlank()) {
+                        val videoUrl = if (filePath.startsWith("/")) "https://xtwap.top$filePath" else filePath
+                        callback(
+                            newExtractorLink(
+                                "AnimeIndo",
+                                "CEPAT",
+                                videoUrl
+                            ) {
+                                this.quality = Qualities.P1080.value
+                                this.referer = fullUrl
+                                this.isM3u8 = true
+                            }
+                        )
+                    }
+                } catch (_: Exception) {}
             } else {
-                // External servers (blogger.com, xtwap.top, gdplayer.to, dll)
+                // External servers (blogger.com, gdplayer.to, dll)
                 loadExtractor(fullUrl, data, subtitleCallback, callback)
             }
         }
