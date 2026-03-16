@@ -1,9 +1,9 @@
 package com.indo
 
 import android.util.Base64
-import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
-import com.google.gson.reflect.TypeToken
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
@@ -28,8 +28,8 @@ class Nimegami : MainAPI() {
     )
 
     data class NimegamiStream(
-        @SerializedName("format") val format: String?,
-        @SerializedName("url") val url: List<String>?
+        @JsonProperty("format") val format: String?,
+        @JsonProperty("url") val url: List<String>?
     )
 
     private fun getImg(el: org.jsoup.nodes.Element): String? {
@@ -52,11 +52,13 @@ class Nimegami : MainAPI() {
         }
     }
 
+    private val jsonMapper = ObjectMapper()
+
     private fun decodeStreamData(b64: String): List<NimegamiStream> {
         return try {
             val json = String(Base64.decode(b64, Base64.DEFAULT))
-            val type = object : TypeToken<List<NimegamiStream>>() {}.type
-            Gson().fromJson<List<NimegamiStream>>(json, type) ?: emptyList()
+            jsonMapper.readValue(json, object : TypeReference<List<NimegamiStream>>() {})
+                ?: emptyList()
         } catch (e: Exception) { emptyList() }
     }
 
