@@ -1,8 +1,6 @@
 package com.indo
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
-import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 
@@ -22,9 +20,11 @@ class Kuramanime : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = request.data + page
-        val document = app.get(url).document
+        val doc = app.get(url).document
 
-        val home = document.select("a[href*='/anime/']").mapNotNull { a ->
+        val isMovie = request.data.contains("/movie")
+
+        val home = doc.select("a[href*='/anime/']").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             if (!href.contains("/anime/")) return@mapNotNull null
             if (href.contains("/episode/")) return@mapNotNull null
@@ -35,12 +35,8 @@ class Kuramanime : MainAPI() {
                 ?: a.text().trim().ifBlank { null }
                 ?: return@mapNotNull null
 
-            val poster = a.selectFirst("img")?.let { img ->
-                img.attr("src").ifBlank { null }
-                    ?: img.attr("data-src").ifBlank { null }
-            }
+            val poster = a.selectFirst("img")?.attr("src")?.ifBlank { null }
 
-            val isMovie = request.data.contains("/movie")
             if (isMovie) {
                 newMovieSearchResponse(title, href, TvType.Movie) {
                     this.posterUrl = poster
@@ -56,10 +52,9 @@ class Kuramanime : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/anime?search_key=$query").document
-        return document.select("a[href*='/anime/']").mapNotNull { a ->
+        val doc = app.get("$mainUrl/anime?search_key=$query").document
+        return doc.select("a[href*='/anime/']").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            if (!href.contains("/anime/")) return@mapNotNull null
             if (href.contains("/episode/")) return@mapNotNull null
             if (!Regex("/anime/\\d+/").containsMatchIn(href)) return@mapNotNull null
 
@@ -67,10 +62,7 @@ class Kuramanime : MainAPI() {
                 ?: a.text().trim().ifBlank { null }
                 ?: return@mapNotNull null
 
-            val poster = a.selectFirst("img")?.let { img ->
-                img.attr("src").ifBlank { null }
-                    ?: img.attr("data-src").ifBlank { null }
-            }
+            val poster = a.selectFirst("img")?.attr("src")?.ifBlank { null }
 
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = poster
@@ -79,66 +71,41 @@ class Kuramanime : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+        val doc = app.get(url).document
 
-        val title = document.selectFirst("h2, h1, .anime__details__title")
-            ?.text()?.trim()
+        val title = doc.selectFirst("h2")?.text()?.trim()
             ?: throw ErrorLoadingException("Title not found")
 
-        val poster = document.selectFirst("div.anime__details__pic img, div.anime__details img")
-            ?.let { img ->
-                img.attr("src").ifBlank { null }
-                    ?: img.attr("data-src").ifBlank { null }
-            }
-            ?: document.selectFirst("img[alt*='$title']")
-                ?.let { img ->
-                    img.attr("src").ifBlank { null }
-                        ?: img.attr("data-src").ifBlank { null }
-                }
+        val poster = doc.selectFirst("img[alt]")
+            ?.attr("src")?.ifBlank { null }
 
-        val description = document.selectFirst("div.anime__details__text p, div.anime__details__content p")
-            ?.text()?.trim()
+        val description = doc.selectFirst("p")?.text()?.trim()
 
-        val genres = document.select("a[href*='/properties/genre/']").map { it.text() }.filter { it.isNotBlank() }
+        val genres = doc.select("a[href*='/properties/genre/']").map { it.text() }
 
-        val year = document.selectFirst("a[href*='/properties/season/']")
-            ?.text()?.trim()?.takeLast(4)?.toIntOrNull()
-
-        // Check if it's a movie
-        val isMovie = document.selectFirst("a[href*='/properties/type/movie']") != null
-            || url.contains("/quick/movie")
-
-        // Episodes from popover or direct links
-        val episodeLinks = document.select("a[href*='/episode/']")
-            .mapNotNull { a ->
-                val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-                val epNum = Regex("/episode/(\\d+)").find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                    ?: return@mapNotNull null
-                Pair(href, epNum)
-            }
-            .distinctBy { it.first }
-            .sortedBy { it.second }
-
-        val episodes = episodeLinks.map { (href, epNum) ->
+        val episodes = doc.select("a[href*='/episode/']").mapNotNull { a ->
+            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+            val ep = Regex("/episode/(\\d+)").find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: return@mapNotNull null
             newEpisode(href) {
-                this.name = "Episode $epNum"
-                this.episode = epNum
+                this.name = "Episode $ep"
+                this.episode = ep
             }
-        }
+        }.distinctBy { it.data }.sortedBy { it.episode }
 
-        return if (isMovie && episodes.isEmpty()) {
+        val isMovie = url.contains("/quick/movie") || doc.selectFirst("a[href*='/properties/type/movie']") != null
+
+        return if (isMovie) {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.plot = description
                 this.tags = genres
-                this.year = year
             }
         } else {
             newAnimeLoadResponse(title, url, TvType.Anime) {
                 this.posterUrl = poster
                 this.plot = description
                 this.tags = genres
-                this.year = year
                 addEpisodes(DubStatus.Subbed, episodes)
             }
         }
@@ -150,17 +117,7 @@ class Kuramanime : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // TODO: Streaming extraction needs API sniffing
-        // User will implement after analyzing network requests
-        val document = app.get(data).document
-
-        // Try to find iframe or direct video sources
-        document.select("iframe[src]").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-            val fullUrl = if (src.startsWith("/")) "$mainUrl$src" else src
-            loadExtractor(fullUrl, data, subtitleCallback, callback)
-        }
-
-        return true
+        // TODO: Implement streaming extraction later
+        return false
     }
 }
