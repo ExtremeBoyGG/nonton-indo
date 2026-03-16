@@ -21,41 +21,56 @@ class AnimeIndo : MainAPI() {
     //               <img data-original="..."><p>Judul</p><span class="eps">N</span>
     //           </div></a>
     override val mainPage = mainPageOf(
-        "$mainUrl/page/" to "Episode Terbaru"
+        "$mainUrl/page/" to "Episode Terbaru",
+        "$mainUrl/movie/page/" to "Movie"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Page 1 = root URL, page 2+ = /page/N/ (butuh trailing slash)
-        val url = if (page == 1) "$mainUrl/" else "$mainUrl/page/$page/"
+        val isMovie = request.data.contains("/movie/")
+
+        val url = if (isMovie) {
+            if (page == 1) "$mainUrl/movie/" else "$mainUrl/movie/page/$page/"
+        } else {
+            if (page == 1) "$mainUrl/" else "$mainUrl/page/$page/"
+        }
         val document = app.get(url).document
 
-        // Selector: a[href] di dalam div.menu, filter yang punya child div.list-anime
-        // :has() gak support di Jsoup, jadi pakai filter manual
-        val home = document.select("div.menu a[href]").mapNotNull { a ->
-            val inner = a.selectFirst("div.list-anime") ?: return@mapNotNull null
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+        val home = if (isMovie) {
+            // Movie page: table.otable > tr > td.vithumb (poster) + td.videsc (info)
+            document.select("table.otable").mapNotNull { table ->
+                val link = table.selectFirst("td.vithumb a[href]") ?: return@mapNotNull null
+                val href = link.attr("href").ifBlank { null } ?: return@mapNotNull null
+                val poster = link.selectFirst("img")?.attr("src")?.ifBlank { null }?.let { fixUrl(it) }
+                val desc = table.selectFirst("td.videsc") ?: return@mapNotNull null
+                val title = desc.selectFirst("a[href]")?.text()?.trim()?.ifBlank { null }
+                    ?: return@mapNotNull null
+                newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
+                    this.posterUrl = poster
+                }
+            }.distinctBy { it.url }
+        } else {
+            // Episode page: div.menu a[href] > div.list-anime
+            document.select("div.menu a[href]").mapNotNull { a ->
+                val inner = a.selectFirst("div.list-anime") ?: return@mapNotNull null
+                val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
 
-            // Judul ada di <p>, bukan <h2>/<h3>
-            val title = inner.selectFirst("p")?.text()?.trim()?.ifBlank { null }
-                ?: return@mapNotNull null
+                val title = inner.selectFirst("p")?.text()?.trim()?.ifBlank { null }
+                    ?: return@mapNotNull null
 
-            // Gambar pakai data-original (lazy load)
-            val poster = inner.selectFirst("img")?.let { img ->
-                img.attr("data-original").ifBlank { null } ?: img.attr("src").takeUnless { it.contains("loading") }
-            }
+                val poster = inner.selectFirst("img")?.let { img ->
+                    img.attr("data-original").ifBlank { null } ?: img.attr("src").takeUnless { it.contains("loading") }
+                }
 
-            val epNum = inner.selectFirst("span.eps")?.text()?.trim()?.toIntOrNull()
+                val epNum = inner.selectFirst("span.eps")?.text()?.trim()?.toIntOrNull()
 
-            // Ini link ke episode — kita tampilkan sebagai anime search result
-            // URL episode: /judul-anime-episode-N/
-            // Kita perlu convert ke URL anime: /anime/judul-anime/
-            val animeUrl = episodeToAnimeUrl(href)
+                val animeUrl = episodeToAnimeUrl(href)
 
-            newAnimeSearchResponse(title, fixUrl(animeUrl), TvType.Anime) {
-                this.posterUrl = poster
-                addSub(epNum)
-            }
-        }.distinctBy { it.url }
+                newAnimeSearchResponse(title, fixUrl(animeUrl), TvType.Anime) {
+                    this.posterUrl = poster
+                    addSub(epNum)
+                }
+            }.distinctBy { it.url }
+        }
 
         return newHomePageResponse(request.name, home)
     }
