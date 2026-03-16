@@ -72,14 +72,21 @@ class Rebahin : MainAPI() {
 
         val isSeries = url.contains("/tv/")
         return if (isSeries) {
-            val episodes = doc.select("a[href*=/tv/]").filter { it.attr("href") != url }
-                .mapNotNull { el ->
-                    val href = el.attr("href").ifBlank { null } ?: return@mapNotNull null
-                    val epName = el.text().trim().ifBlank { null } ?: return@mapNotNull null
-                    val ep = Regex("(?:Eps?|Episode)[.\\s-]*(\\d+)", RegexOption.IGNORE_CASE)
-                        .find(epName)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                    newEpisode(href) { this.name = epName; this.episode = ep }
-                }.distinctBy { it.data }
+            // Episode list ada di div.gmr-listseries, link ke /eps/
+            val episodes = doc.select("div.gmr-listseries a[href*=/eps/]").mapNotNull { el ->
+                val href = el.attr("href").ifBlank { null } ?: return@mapNotNull null
+                val epText = el.text().trim().ifBlank { null } ?: return@mapNotNull null
+                // Text contoh: "S1 Eps1", "S1 Eps2"
+                val season = Regex("S(\\d+)", RegexOption.IGNORE_CASE)
+                    .find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                val ep = Regex("Eps?(\\d+)", RegexOption.IGNORE_CASE)
+                    .find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                newEpisode(href) {
+                    this.name = epText
+                    this.season = season
+                    this.episode = ep
+                }
+            }.distinctBy { it.data }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 posterUrl = poster; plot = description; this.tags = tags; this.year = year
             }
@@ -90,11 +97,28 @@ class Rebahin : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         val doc = app.get(data).document
-        doc.select("iframe").mapNotNull { it.attr("src").ifBlank { null } }.forEach { src ->
-            loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+
+        // Download links langsung di HTML: #download .gmr-download-list li a
+        doc.select("div#download ul.gmr-download-list li a[href]").forEach { a ->
+            val href = a.attr("href").ifBlank { null } ?: return@forEach
+            loadExtractor(fixUrl(href), data, subtitleCallback, callback)
         }
+
+        // Fallback: coba iframe jika ada (untuk beberapa halaman yang embed langsung)
+        doc.select("div.tab-content iframe, div.gmr-embed-responsive iframe").forEach { iframe ->
+            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
+            if (!src.contains("youtube")) {
+                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+            }
+        }
+
         return true
     }
 }

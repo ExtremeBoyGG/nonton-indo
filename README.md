@@ -78,7 +78,7 @@
 3. Tambahkan URL repository berikut:
 
 ```
-https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/main/repo.json
+https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/repo.json
 ```
 
 4. Kembali ke halaman utama, plugin akan muncul di tab **Extensions**
