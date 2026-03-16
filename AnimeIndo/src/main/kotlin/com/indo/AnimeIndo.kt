@@ -5,7 +5,6 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.Qualities
 
 class AnimeIndo : MainAPI() {
     override var mainUrl = "https://anime-indo.lol"
@@ -163,9 +162,11 @@ class AnimeIndo : MainAPI() {
                             newExtractorLink(
                                 "AnimeIndo",
                                 "AnimeIndo",
-                                videoSrc,
-                                Qualities.P1080.value
-                            ) { this.referer = mainUrl }
+                                videoSrc
+                            ) {
+                                this.referer = mainUrl
+                                this.quality = 1080
+                            }
                         )
                     }
                 } catch (e: Exception) {
