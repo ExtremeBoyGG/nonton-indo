@@ -117,7 +117,7 @@ class Oploverz : MainAPI() {
         try {
             // Step 1: guest token
             val tokenResp = app.post("https://api.gofile.io/accounts/guest")
-                .parseJson<GofileTokenResponse>()
+                .parsedSafe<GofileTokenResponse>()
             val token = tokenResp?.data?.token ?: return
 
             // Step 2: folder ID dari URL gofile.io/d/XXXXX
@@ -128,17 +128,16 @@ class Oploverz : MainAPI() {
             val content = app.get(
                 "https://api.gofile.io/contents/$folderId?wt=4fd6sg89d7s6",
                 headers = mapOf("Authorization" to "Bearer $token")
-            ).parseJson<GofileContentResponse>()
+            ).parsedSafe<GofileContentResponse>()
 
             // Step 4: tiap file = 1 kualitas
-            // Nama file: "Ikoku Nikki - 10.720.mp4" → quality = "720"
-            content?.data?.children?.values?.forEach { file ->
-                val directLink = file.link ?: return@forEach
-                val name = file.name ?: return@forEach
+            // Nama file: "Ikoku Nikki - 10.720.mp4" → quality dari angka sebelum .mp4
+            content?.data?.children?.values?.forEach { gofile ->
+                val directLink = gofile.link ?: return@forEach
+                val fileName = gofile.name ?: return@forEach
 
-                // Parse quality dari nama file: ambil angka sebelum .mp4/.mkv
                 val qualityStr = Regex("\\.(1K|\\d{3,4})\\.[^.]+$", RegexOption.IGNORE_CASE)
-                    .find(name)?.groupValues?.getOrNull(1) ?: "?"
+                    .find(fileName)?.groupValues?.getOrNull(1) ?: "?"
                 val quality = when (qualityStr.uppercase()) {
                     "1K" -> 1080
                     else -> qualityStr.toIntOrNull()
