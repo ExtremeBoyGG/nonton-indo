@@ -167,7 +167,10 @@ class AnimeIndo : MainAPI() {
                             ) { this.referer = mainUrl }
                         )
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    // Log error but continue - don't break the whole process
+                    // In production, you might want to log this somewhere
+                }
             } else {
                 loadExtractor(fullUrl, data, subtitleCallback, callback)
             }
