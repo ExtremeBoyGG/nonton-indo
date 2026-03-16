@@ -102,17 +102,7 @@ class Otakudesu : MainAPI() {
                 if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        val document = app.get(data, headers = ua).document
-
-        // Iframe streaming
-        document.select("div#pembed iframe, div.player-embed iframe, div.responsive-embed-stream iframe")
-            .forEach { iframe ->
-                val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-                if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
-            }
-
-        // Download links
+        // Download links — quality dari <strong>Mp4 720p</strong>
         document.select("div.download li").forEach { li ->
             li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
