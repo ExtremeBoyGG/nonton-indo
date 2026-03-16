@@ -53,7 +53,7 @@ class Nimegami : MainAPI() {
     private fun decodeStreamData(b64: String): List<NimegamiStream> {
         return try {
             val json = String(Base64.decode(b64, Base64.DEFAULT))
-            mapper.readValue<List<NimegamiStream>>(json)
+            tryParseJson<List<NimegamiStream>>(json) ?: emptyList()
         } catch (e: Exception) { emptyList() }
     }
 
