@@ -152,7 +152,25 @@ class AnimeIndo : MainAPI() {
         // Load semua server
         serverUrls.forEach { url ->
             val fullUrl = if (url.startsWith("/")) "$mainUrl$url" else url
-            loadExtractor(fullUrl, data, subtitleCallback, callback)
+            if (fullUrl.contains(mainUrl)) {
+                // Internal player (btube3.php) — ambil direct video URL dari <source> tag
+                try {
+                    val playerDoc = app.get(fullUrl).document
+                    val videoSrc = playerDoc.selectFirst("video source[src]")?.attr("src")
+                    if (!videoSrc.isNullOrBlank()) {
+                        callback(
+                            newExtractorLink(
+                                "AnimeIndo",
+                                "AnimeIndo",
+                                videoSrc,
+                                Qualities.P1080.value
+                            ) { this.referer = mainUrl }
+                        )
+                    }
+                } catch (_: Exception) {}
+            } else {
+                loadExtractor(fullUrl, data, subtitleCallback, callback)
+            }
         }
 
         // Download link dari .navi (biasanya GDrive)
