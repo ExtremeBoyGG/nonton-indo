@@ -63,10 +63,12 @@ class Rebahin : MainAPI() {
             ?: throw ErrorLoadingException("Title not found")
 
         val poster = doc.selectFirst("div.poster img, div.thumb img, img[src*=upload]")?.attr("src")?.ifBlank { null }
-        val description = doc.selectFirst("div.entry-content > p, div.sinopsis")
+        val description = doc.selectFirst("div.entry-content, div.entry-content-single")
+            ?.select("h2")
+            ?.firstOrNull { it.text().contains("Sinopsis", ignoreCase = true) }
+            ?.nextElementSibling()
+            ?.takeIf { it.tagName() == "p" }
             ?.text()?.trim()
-            ?.replace(Regex("^Nonton Film.*Sub Indo.*?–\\s*", RegexOption.DOT_MATCHES_ALL), "")
-            ?.trim()
         val tags = doc.select("a[href*=category], a[rel=category]").map { it.text() }.filter { it.isNotBlank() }
         val year = doc.selectFirst("a[href*=/year/]")?.text()?.trim()?.toIntOrNull()
 
