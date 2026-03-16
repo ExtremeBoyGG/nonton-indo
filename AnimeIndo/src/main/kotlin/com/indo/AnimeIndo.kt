@@ -188,7 +188,6 @@ class AnimeIndo : MainAPI() {
                             ) {
                                 this.quality = Qualities.P1080.value
                                 this.referer = fullUrl
-                                this.isM3u8 = true
                             }
                         )
                     }
