@@ -154,7 +154,7 @@ class AnimeIndo : MainAPI() {
         // Load semua server
         serverUrls.forEach { url ->
             val fullUrl = if (url.startsWith("/")) "$mainUrl$url" else url
-            if (fullUrl.contains(mainUrl)) {
+            if (fullUrl.contains("btube3.php")) {
                 // Internal player (btube3.php) — ambil direct video URL dari <source> tag
                 try {
                     val playerDoc = app.get(fullUrl).document
@@ -172,10 +172,10 @@ class AnimeIndo : MainAPI() {
                         )
                     }
                 } catch (e: Exception) {
-                    // Log error but continue - don't break the whole process
-                    // In production, you might want to log this somewhere
+                    // skip server ini kalau gagal
                 }
             } else {
+                // External servers (blogger.com, xtwap.top, gdplayer.to, dll)
                 loadExtractor(fullUrl, data, subtitleCallback, callback)
             }
         }
