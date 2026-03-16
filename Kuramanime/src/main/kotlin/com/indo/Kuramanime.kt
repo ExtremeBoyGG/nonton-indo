@@ -24,14 +24,15 @@ class Kuramanime : MainAPI() {
         val url = request.data + page
         val document = app.get(url).document
 
-        val home = document.select("div.anime__page__content a[href*='/anime/']").mapNotNull { a ->
+        val home = document.select("a[href*='/anime/']").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             if (!href.contains("/anime/")) return@mapNotNull null
-            // Skip episode links, only want anime detail links
             if (href.contains("/episode/")) return@mapNotNull null
+            if (!Regex("/anime/\\d+/").containsMatchIn(href)) return@mapNotNull null
 
             val title = a.selectFirst("h5")?.text()?.trim()
                 ?: a.attr("title").ifBlank { null }
+                ?: a.text().trim().ifBlank { null }
                 ?: return@mapNotNull null
 
             val poster = a.selectFirst("img")?.let { img ->
@@ -39,7 +40,7 @@ class Kuramanime : MainAPI() {
                     ?: img.attr("data-src").ifBlank { null }
             }
 
-            val isMovie = href.contains("/quick/movie") || request.data.contains("/movie")
+            val isMovie = request.data.contains("/movie")
             if (isMovie) {
                 newMovieSearchResponse(title, href, TvType.Movie) {
                     this.posterUrl = poster
@@ -51,31 +52,7 @@ class Kuramanime : MainAPI() {
             }
         }.distinctBy { it.url }
 
-        // Fallback: if no cards found, try generic anime links
-        val results = if (home.isEmpty()) {
-            document.select("a[href*='/anime/']").mapNotNull { a ->
-                val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-                if (!href.contains("/anime/")) return@mapNotNull null
-                if (href.contains("/episode/")) return@mapNotNull null
-                // Must be a direct anime link like /anime/123/slug
-                if (!Regex("/anime/\\d+/").containsMatchIn(href)) return@mapNotNull null
-
-                val title = a.selectFirst("h5")?.text()?.trim()
-                    ?: a.text().trim().ifBlank { null }
-                    ?: return@mapNotNull null
-
-                val poster = a.selectFirst("img")?.let { img ->
-                    img.attr("src").ifBlank { null }
-                        ?: img.attr("data-src").ifBlank { null }
-                }
-
-                newAnimeSearchResponse(title, href, TvType.Anime) {
-                    this.posterUrl = poster
-                }
-            }.distinctBy { it.url }
-        } else home
-
-        return newHomePageResponse(request.name, results)
+        return newHomePageResponse(request.name, home)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
