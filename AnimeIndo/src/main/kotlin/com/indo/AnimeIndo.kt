@@ -25,10 +25,11 @@ class AnimeIndo : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data + page).document
 
-        // Selector: a yang mengandung div.list-anime
-        val home = document.select("div.menu a:has(div.list-anime)").mapNotNull { a ->
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+        // Selector: a[href] di dalam div.menu, filter yang punya child div.list-anime
+        // :has() gak support di Jsoup, jadi pakai filter manual
+        val home = document.select("div.menu a[href]").mapNotNull { a ->
             val inner = a.selectFirst("div.list-anime") ?: return@mapNotNull null
+            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
 
             // Judul ada di <p>, bukan <h2>/<h3>
             val title = inner.selectFirst("p")?.text()?.trim()?.ifBlank { null }
@@ -65,9 +66,9 @@ class AnimeIndo : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/search.php?q=$query").document
-        return document.select("div.menu a:has(div.list-anime)").mapNotNull { a ->
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+        return document.select("div.menu a[href]").mapNotNull { a ->
             val inner = a.selectFirst("div.list-anime") ?: return@mapNotNull null
+            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             val title = inner.selectFirst("p")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
             val poster = inner.selectFirst("img")?.attr("data-original")?.ifBlank { null }
             newAnimeSearchResponse(title, fixUrl(href), TvType.Anime) { this.posterUrl = poster }
