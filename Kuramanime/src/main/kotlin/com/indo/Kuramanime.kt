@@ -1,11 +1,9 @@
 package com.indo
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 
-@CloudstreamPlugin
 class Kuramanime : MainAPI() {
     override var mainUrl = "https://v17.kuramanime.ink"
     override var name = "Kuramanime"
