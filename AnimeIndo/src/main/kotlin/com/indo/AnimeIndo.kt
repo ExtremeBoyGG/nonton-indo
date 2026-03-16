@@ -23,7 +23,9 @@ class AnimeIndo : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data + page).document
+        // Page 1 = root URL, page 2+ = /page/N/ (butuh trailing slash)
+        val url = if (page == 1) "$mainUrl/" else "$mainUrl/page/$page/"
+        val document = app.get(url).document
 
         // Selector: a[href] di dalam div.menu, filter yang punya child div.list-anime
         // :has() gak support di Jsoup, jadi pakai filter manual
