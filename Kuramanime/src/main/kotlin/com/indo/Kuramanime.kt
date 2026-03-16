@@ -22,14 +22,16 @@ class Kuramanime : MainAPI() {
         val url = request.data + page
         val doc = app.get(url).document
 
-        val home = doc.select("a[href]").mapNotNull { a ->
+        val home = doc.select("a:has(div.product__sidebar__view__item)").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             if (!href.contains("/anime/")) return@mapNotNull null
-            if (href.contains("/episode/")) return@mapNotNull null
-            if (!Regex("/anime/\\d+/").containsMatchIn(href)) return@mapNotNull null
 
-            val title = a.selectFirst("h5")?.text()?.trim() ?: return@mapNotNull null
-            val poster = a.selectFirst("img")?.attr("src")?.ifBlank { null }
+            // Title from h5 inside div.product__sidebar__view__item
+            val title = a.selectFirst("div h5")?.text()?.trim()?.ifBlank { null }
+                ?: return@mapNotNull null
+
+            // Poster from data-setbg attribute on div.set-bg
+            val poster = a.selectFirst("div.set-bg")?.attr("data-setbg")?.ifBlank { null }
 
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = poster
