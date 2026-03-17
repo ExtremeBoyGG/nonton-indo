@@ -105,16 +105,15 @@ class Otakudesu : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data, headers = ua).document
 
-        // Iframe streaming
+        // Iframe streaming (desustream, etc)
         document.select("div#pembed iframe, div.player-embed iframe, div.responsive-embed-stream iframe")
             .forEach { iframe ->
                 val src = iframe.attr("src").ifBlank { null } ?: return@forEach
                 if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
 
-        // Download links — quality dari <strong>Mp4 720p</strong>
+        // Download links
         document.select("div.download li").forEach { li ->
-            // Ambil quality text dari <strong> di parent li
             val qualityText = li.selectFirst("strong")?.text() ?: ""
             val quality = when {
                 qualityText.contains("1080") -> Qualities.P1080.value
@@ -124,13 +123,31 @@ class Otakudesu : MainAPI() {
                 qualityText.contains("240")  -> Qualities.P240.value
                 else -> Qualities.Unknown.value
             }
+
             li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
                 val serverName = a.text().trim().ifBlank { "Download" }
-                callback(newExtractorLink("Otakudesu", serverName, fixUrl(href)) {
-                    this.quality = quality
-                    this.referer = data
-                })
+
+                when {
+                    // Krakenfiles - extract video URL directly
+                    href.contains("krakenfiles.com") -> {
+                        try {
+                            val kfDoc = app.get(href).document
+                            val videoUrl = kfDoc.selectFirst("source[src*=krakencloud], source[type=video/mp4]")
+                                ?.attr("src")?.ifBlank { null }
+                            if (videoUrl != null) {
+                                callback(newExtractorLink("KrakenFiles", serverName, videoUrl) {
+                                    this.quality = quality
+                                    this.referer = href
+                                })
+                            }
+                        } catch (e: Exception) { }
+                    }
+                    // Other hosts - use loadExtractor
+                    else -> {
+                        loadExtractor(fixUrl(href), data, subtitleCallback, callback)
+                    }
+                }
             }
         }
 

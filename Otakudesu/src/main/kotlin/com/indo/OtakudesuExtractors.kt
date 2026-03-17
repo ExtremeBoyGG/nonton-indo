@@ -18,13 +18,22 @@ class KrakenFiles : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val doc = app.get(url).document
+        // Handle /view/ URLs directly (from Otakudesu)
+        val pageUrl = if ("/view/" in url) {
+            url
+        } else {
+            // Extract ID and use embed URL
+            val id = Regex("/(?:view|embed-video)/([\\da-zA-Z]+)").find(url)?.groupValues?.get(1) ?: return
+            "$mainUrl/embed-video/$id"
+        }
+
+        val doc = app.get(pageUrl).document
         val videoUrl = doc.selectFirst("source[src*=krakencloud], source[type=video/mp4]")
             ?.attr("src")?.ifBlank { null } ?: return
 
         callback.invoke(
             newExtractorLink(name, name, videoUrl) {
-                this.referer = referer ?: url
+                this.referer = pageUrl
                 this.quality = Qualities.Unknown.value
             }
         )
