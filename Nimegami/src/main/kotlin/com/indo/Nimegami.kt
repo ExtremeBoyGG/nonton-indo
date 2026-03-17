@@ -169,7 +169,7 @@ class Nimegami : MainAPI() {
                     val quality = parseQuality(format)
                     entry.url?.forEach { streamUrl ->
                         if (streamUrl.isNotBlank()) {
-                            callback(newExtractorLink("Nimegami Stream", "Stream $format", streamUrl) {
+                            callback(newExtractorLink("Nimegami Stream", "Stream", streamUrl) {
                                 this.quality = quality
                                 this.referer = pageUrl
                             })

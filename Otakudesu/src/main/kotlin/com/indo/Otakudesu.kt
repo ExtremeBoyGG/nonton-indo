@@ -4,7 +4,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class Otakudesu : MainAPI() {
     override var mainUrl = "https://otakudesu.blog"
@@ -104,9 +106,23 @@ class Otakudesu : MainAPI() {
 
         // Download links — quality dari <strong>Mp4 720p</strong>
         document.select("div.download li").forEach { li ->
+            // Ambil quality text dari <strong> di parent li
+            val qualityText = li.selectFirst("strong")?.text() ?: ""
+            val quality = when {
+                qualityText.contains("1080") -> Qualities.P1080.value
+                qualityText.contains("720")  -> Qualities.P720.value
+                qualityText.contains("480")  -> Qualities.P480.value
+                qualityText.contains("360")  -> Qualities.P360.value
+                qualityText.contains("240")  -> Qualities.P240.value
+                else -> Qualities.Unknown.value
+            }
             li.select("a[href]").forEach { a ->
                 val href = a.attr("href").ifBlank { null } ?: return@forEach
-                loadExtractor(fixUrl(href), data, subtitleCallback, callback)
+                val serverName = a.text().trim().ifBlank { "Download" }
+                callback(newExtractorLink("Otakudesu", serverName, fixUrl(href)) {
+                    this.quality = quality
+                    this.referer = data
+                })
             }
         }
 

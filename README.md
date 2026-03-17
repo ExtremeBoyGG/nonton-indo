@@ -44,24 +44,21 @@
 
 | Plugin | Situs | Status |
 |--------|-------|--------|
-| AnimeIndo | anime-indo.lol | Development |
+| AnimeIndo | anime-indo.lol | ✅ Working |
 | Oploverz | oploverz.ch | Development |
-| Otakudesu | otakudesu.blog | Development |
-| Nimegami | nimegami.id | Development |
+| Otakudesu | otakudesu.blog | ✅ Working |
+| Nimegami | nimegami.id | ✅ Working |
 | Animasu | animasuid.com | Development |
+| Kuramanime | kuramanime.ink | Development |
 | Samehadaku | v2.samehadaku.how | Development |
-| Dubindo | dubbindo.site | Development |
-| Kitanonton | kitanonton2.world | Development |
 
 ### Film & Drama
 
 | Plugin | Situs | Status |
 |--------|-------|--------|
 | Pahe | pahe.ink | Development |
-| Rebahin | rebahin | Development |
+| Rebahin | rebahin | ✅ Working |
 | Idlix | idlix | Development |
-| LK21 | lk21official | Development |
-| Cgvindo | cgvindo | Development |
 
 ---
 
