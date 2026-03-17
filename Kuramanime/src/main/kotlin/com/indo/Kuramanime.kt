@@ -25,7 +25,7 @@ class Kuramanime : MainAPI() {
         val doc = app.get(mainUrl).document
 
         // Homepage has 3 div.trending__product sections, each with one div.filter__gallery
-        val sections = doc.select("div.trending__product")
+        val sections = doc.getElementsByClass("trending__product")
         val sectionIndex = when (request.name) {
             "Episode Terbaru" -> 0
             "Selesai Tayang" -> 1
@@ -36,16 +36,19 @@ class Kuramanime : MainAPI() {
         val section = sections.getOrNull(sectionIndex)
             ?: return newHomePageResponse(request.name, emptyList())
 
-        val gallery = section.selectFirst("div.filter__gallery")
+        val gallery = section.getElementsByClass("filter__gallery").firstOrNull()
             ?: return newHomePageResponse(request.name, emptyList())
 
-        val home = gallery.select("a[href*=/anime/]").mapNotNull { a ->
+        val home = gallery.getElementsByTag("a").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+            if (!href.contains("/anime/")) return@mapNotNull null
 
-            val title = a.selectFirst("h5.sidebar-title-h5")?.text()?.trim()?.ifBlank { null }
+            val title = a.getElementsByClass("sidebar-title-h5").firstOrNull()
+                ?.text()?.trim()?.ifBlank { null }
                 ?: return@mapNotNull null
 
-            val poster = a.selectFirst("div.set-bg[data-setbg]")?.attr("data-setbg")?.ifBlank { null }
+            val poster = a.getElementsByClass("set-bg").firstOrNull()
+                ?.attr("data-setbg")?.ifBlank { null }
 
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = poster
@@ -59,11 +62,19 @@ class Kuramanime : MainAPI() {
         val url = "$mainUrl/anime?search=$query&order_by=text"
         val doc = app.get(url).document
 
-        return doc.select("a[href*=/anime/]").mapNotNull { a ->
+        val gallery = doc.getElementsByClass("filter__gallery").firstOrNull()
+            ?: return emptyList()
+
+        return gallery.getElementsByTag("a").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = a.selectFirst("h5.sidebar-title-h5")?.text()?.trim()?.ifBlank { null }
+            if (!href.contains("/anime/")) return@mapNotNull null
+
+            val title = a.getElementsByClass("sidebar-title-h5").firstOrNull()
+                ?.text()?.trim()?.ifBlank { null }
                 ?: return@mapNotNull null
-            val poster = a.selectFirst("div.set-bg[data-setbg]")?.attr("data-setbg")?.ifBlank { null }
+
+            val poster = a.getElementsByClass("set-bg").firstOrNull()
+                ?.attr("data-setbg")?.ifBlank { null }
 
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = poster
@@ -75,16 +86,18 @@ class Kuramanime : MainAPI() {
         val animeUrl = url.replace("/episode/.*".toRegex(), "")
         val doc = app.get(animeUrl).document
 
-        val title = doc.selectFirst("h2, .anime__details__title")
+        val title = doc.getElementsByTag("h2").firstOrNull()
             ?.text()?.trim() ?: "Unknown"
 
-        val poster = doc.selectFirst("div.set-bg[data-setbg]")
+        val poster = doc.getElementsByClass("set-bg").firstOrNull()
             ?.attr("data-setbg")?.ifBlank { null }
 
-        val description = doc.selectFirst(".anime__details__content p")
-            ?.text()?.trim()
+        val description = doc.getElementsByClass("anime__details__content").firstOrNull()
+            ?.getElementsByTag("p")?.firstOrNull()?.text()?.trim()
 
-        val episodes = doc.select("a.ep-button[type=episode]").mapNotNull { ep ->
+        val episodes = doc.getElementsByAttribute("type").filter {
+            it.attr("type") == "episode"
+        }.mapNotNull { ep ->
             val epHref = ep.attr("href").ifBlank { null } ?: return@mapNotNull null
             val epTitle = ep.text().trim().ifBlank { null } ?: return@mapNotNull null
             newEpisode(epHref) { this.name = epTitle }
@@ -105,12 +118,12 @@ class Kuramanime : MainAPI() {
     ): Boolean {
         val doc = app.get(data).document
 
-        doc.select("iframe").forEach { iframe ->
+        doc.getElementsByTag("iframe").forEach { iframe ->
             val src = iframe.attr("src").ifBlank { null } ?: return@forEach
             loadExtractor(src, data, subtitleCallback, callback)
         }
 
-        doc.select("source, video source").forEach { source ->
+        doc.getElementsByTag("source").forEach { source ->
             val src = source.attr("src").ifBlank { null } ?: return@forEach
             callback.invoke(
                 newExtractorLink(
