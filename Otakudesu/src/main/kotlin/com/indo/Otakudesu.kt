@@ -34,7 +34,15 @@ class Otakudesu : MainAPI() {
             val title = el.selectFirst("h2.jdlflm")?.text()?.trim()
                 ?: a.attr("title").ifBlank { null } ?: return@mapNotNull null
             val poster = el.selectFirst("div.thumbz > img")?.attr("src")?.ifBlank { null }
-            newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = poster }
+
+            // Ambil episode info dari div.epz → "Episode 10" → 10
+            val epText = el.selectFirst("div.epz")?.text()?.trim() ?: ""
+            val epNum = Regex("(\\d+)").find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+            newAnimeSearchResponse(title, href, TvType.Anime) {
+                this.posterUrl = poster
+                addSub(epNum)
+            }
         }.distinctBy { it.url }
         return newHomePageResponse(request.name, home)
     }
