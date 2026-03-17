@@ -24,9 +24,11 @@ class Kuramanime : MainAPI() {
         val url = request.data + page
         val doc = app.get(url).document
 
-        val home = doc.select("a[href*=/anime/]").mapNotNull { a ->
+        // Only select items inside filter__gallery to avoid sidebar duplicates
+        val gallery = doc.selectFirst("div.filter__gallery") ?: return newHomePageResponse(request.name, emptyList())
+
+        val home = gallery.select("a[href*=/anime/]").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            if (!href.contains("/anime/")) return@mapNotNull null
 
             val title = a.selectFirst("h5.sidebar-title-h5")?.text()?.trim()?.ifBlank { null }
                 ?: return@mapNotNull null
