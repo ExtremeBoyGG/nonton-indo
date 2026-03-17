@@ -105,14 +105,7 @@ class Otakudesu : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data, headers = ua).document
 
-        // Iframe streaming (desustream → blogger, hard to extract directly)
-        document.select("div#pembed iframe, div.player-embed iframe, div.responsive-embed-stream iframe")
-            .forEach { iframe ->
-                val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-                if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
-            }
-
-        // Download links - extract video URLs directly for known hosts
+        // Download links - only KrakenFiles and PixelDrain for now
         document.select("div.download li").forEach { li ->
             val qualityText = li.selectFirst("strong")?.text() ?: ""
             val quality = when {
@@ -153,10 +146,7 @@ class Otakudesu : MainAPI() {
                             })
                         }
                     }
-                    // Other hosts - try loadExtractor
-                    else -> {
-                        loadExtractor(fixUrl(href), data, subtitleCallback, callback)
-                    }
+                    // Skip other hosts for now (too slow)
                 }
             }
         }
