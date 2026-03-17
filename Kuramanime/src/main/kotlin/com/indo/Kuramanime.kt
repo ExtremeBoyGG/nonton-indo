@@ -14,18 +14,30 @@ class Kuramanime : MainAPI() {
     override val hasDownloadSupport = false
     override val supportedTypes = setOf(TvType.Anime)
 
+    // Use the homepage which has 3 sections: Sedang Tayang, Selesai Tayang, Film Layar Lebar
     override val mainPage = mainPageOf(
-        "$mainUrl/quick/ongoing?order_by=updated&page=" to "Episode Terbaru",
-        "$mainUrl/quick/finished?order_by=updated&page=" to "Selesai Tayang",
-        "$mainUrl/quick/movie?order_by=updated&page=" to "Film Layar Lebar"
+        mainUrl to "Episode Terbaru",
+        mainUrl to "Selesai Tayang",
+        mainUrl to "Film Layar Lebar"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = request.data + page
-        val doc = app.get(url).document
+        val doc = app.get(mainUrl).document
 
-        // Only select items inside filter__gallery to avoid sidebar duplicates
-        val gallery = doc.selectFirst("div.filter__gallery") ?: return newHomePageResponse(request.name, emptyList())
+        // Homepage has 3 div.trending__product sections, each with one div.filter__gallery
+        val sections = doc.select("div.trending__product")
+        val sectionIndex = when (request.name) {
+            "Episode Terbaru" -> 0
+            "Selesai Tayang" -> 1
+            "Film Layar Lebar" -> 2
+            else -> 0
+        }
+
+        val section = sections.getOrNull(sectionIndex)
+            ?: return newHomePageResponse(request.name, emptyList())
+
+        val gallery = section.selectFirst("div.filter__gallery")
+            ?: return newHomePageResponse(request.name, emptyList())
 
         val home = gallery.select("a[href*=/anime/]").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
