@@ -105,14 +105,14 @@ class Otakudesu : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data, headers = ua).document
 
-        // Iframe streaming (desustream, etc)
+        // Iframe streaming (desustream → blogger, hard to extract directly)
         document.select("div#pembed iframe, div.player-embed iframe, div.responsive-embed-stream iframe")
             .forEach { iframe ->
                 val src = iframe.attr("src").ifBlank { null } ?: return@forEach
                 if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
 
-        // Download links
+        // Download links - extract video URLs directly for known hosts
         document.select("div.download li").forEach { li ->
             val qualityText = li.selectFirst("strong")?.text() ?: ""
             val quality = when {
@@ -129,7 +129,7 @@ class Otakudesu : MainAPI() {
                 val serverName = a.text().trim().ifBlank { "Download" }
 
                 when {
-                    // Krakenfiles - extract video URL directly
+                    // Krakenfiles - extract video URL directly from page
                     href.contains("krakenfiles.com") -> {
                         try {
                             val kfDoc = app.get(href).document
@@ -141,9 +141,19 @@ class Otakudesu : MainAPI() {
                                     this.referer = href
                                 })
                             }
-                        } catch (e: Exception) { }
+                        } catch (_: Exception) { }
                     }
-                    // Other hosts - use loadExtractor
+                    // PixelDrain - use direct API download URL
+                    href.contains("pixeldrain.com") -> {
+                        val pdId = Regex("pixeldrain\\.com/u/(\\w+)").find(href)?.groupValues?.getOrNull(1)
+                        if (pdId != null) {
+                            callback(newExtractorLink("PixelDrain", serverName, "https://pixeldrain.com/api/file/$pdId") {
+                                this.quality = quality
+                                this.referer = href
+                            })
+                        }
+                    }
+                    // Other hosts - try loadExtractor
                     else -> {
                         loadExtractor(fixUrl(href), data, subtitleCallback, callback)
                     }
