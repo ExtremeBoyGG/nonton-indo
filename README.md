@@ -44,10 +44,10 @@
 
 | Plugin | Situs | Status |
 |--------|-------|--------|
-| AnimeIndo | anime-indo.lol | ✅ Working |
+| AnimeIndo | anime-indo.lol | Development |
 | Oploverz | oploverz.ch | Development |
-| Otakudesu | otakudesu.blog | ✅ Working |
-| Nimegami | nimegami.id | ✅ Working |
+| Otakudesu | otakudesu.blog | ✅ Stable |
+| Nimegami | nimegami.id | Development |
 | Animasu | animasuid.com | Development |
 | Kuramanime | kuramanime.ink | Development |
 | Samehadaku | v2.samehadaku.how | Development |
@@ -57,7 +57,7 @@
 | Plugin | Situs | Status |
 |--------|-------|--------|
 | Pahe | pahe.ink | Development |
-| Rebahin | rebahin | ✅ Working |
+| Rebahin | rebahin | ✅ Stable |
 | Idlix | idlix | Development |
 
 ---
