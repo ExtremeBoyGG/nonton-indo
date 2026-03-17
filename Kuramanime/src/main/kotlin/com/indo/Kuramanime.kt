@@ -2,7 +2,9 @@ package com.indo
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class Kuramanime : MainAPI() {
     override var mainUrl = "https://v17.kuramanime.ink"
@@ -71,13 +73,13 @@ class Kuramanime : MainAPI() {
         val episodes = doc.select("a.ep-button[type=episode]").mapNotNull { ep ->
             val epHref = ep.attr("href").ifBlank { null } ?: return@mapNotNull null
             val epTitle = ep.text().trim().ifBlank { null } ?: return@mapNotNull null
-            Episode(epHref, epTitle)
+            newEpisode(epHref) { this.name = epTitle }
         }.reversed()
 
         return newAnimeLoadResponse(title, url, TvType.Anime) {
             this.posterUrl = poster
             this.plot = description
-            addEpisodes(DubStatus.Sub, episodes)
+            addEpisodes(DubStatus.Subbed, episodes)
         }
     }
 
@@ -97,14 +99,14 @@ class Kuramanime : MainAPI() {
         doc.select("source, video source").forEach { source ->
             val src = source.attr("src").ifBlank { null } ?: return@forEach
             callback.invoke(
-                ExtractorLink(
+                newExtractorLink(
                     source = this.name,
                     name = this.name,
                     url = src,
-                    referer = data,
-                    quality = Qualities.Unknown.value,
-                    isM3u8 = src.contains(".m3u8")
-                )
+                ) {
+                    this.referer = data
+                    this.quality = Qualities.Unknown.value
+                }
             )
         }
 
