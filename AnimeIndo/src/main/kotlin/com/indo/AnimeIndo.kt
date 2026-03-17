@@ -173,7 +173,8 @@ class AnimeIndo : MainAPI() {
                 // Internal player (btube3.php) — ambil direct video URL dari <source> tag
                 try {
                     val playerDoc = app.get(fullUrl).document
-                    val videoSrc = playerDoc.selectFirst("video source[src]")?.attr("src")
+                    val videoSrc = playerDoc.selectFirst("source[src]")?.attr("src")
+                        ?: playerDoc.selectFirst("video")?.attr("src")
                     if (!videoSrc.isNullOrBlank()) {
                         callback(
                             newExtractorLink(
@@ -182,7 +183,7 @@ class AnimeIndo : MainAPI() {
                                 videoSrc
                             ) {
                                 this.quality = Qualities.P1080.value
-                                this.referer = data
+                                this.referer = "https://www.blogger.com/"
                             }
                         )
                     }
