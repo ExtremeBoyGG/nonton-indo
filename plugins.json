@@ -1,0 +1,328 @@
+[
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://anichin.cafe&sz=%size%",
+        "fileHash": "sha256-981e00e01ac0f40fe7e40802d289bdc889af285086b6f385db3e03b1c697eee0",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 22893,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie"
+        ],
+        "version": 1,
+        "internalName": "Anichin",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Anichin.cs3",
+        "name": "Anichin"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://animasuid.com&sz=%size%",
+        "fileHash": "sha256-ef9bcd8bced2111065a6698fddc8813707cbffd9e411039dcb0c2a6301e722ec",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 14645,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "OVA",
+            "Anime"
+        ],
+        "version": 1,
+        "internalName": "Animasu",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Animasu.cs3",
+        "name": "Animasu"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://anime-indo.lol&sz=%size%",
+        "fileHash": "sha256-1101f01383716c135d0cfe27e2199a56400456a6f4ec94135e1ca03a14cf3910",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 22082,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "OVA",
+            "Anime",
+            "Movie"
+        ],
+        "version": 1,
+        "internalName": "AnimeIndo",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/AnimeIndo.cs3",
+        "name": "AnimeIndo"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://donghub.vip&sz=%size%",
+        "fileHash": "sha256-11f223106e969f5164c493d1a08e7687c04b2ee6ecd65d8232d5445d2585ae19",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 23018,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie"
+        ],
+        "version": 1,
+        "internalName": "Donghub",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Donghub.cs3",
+        "name": "Donghub"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://hanime.tv&sz=%size%",
+        "fileHash": "sha256-5cb6a110dd26818969b660bbf18a8d56cd95719186bce51069205264baf89d25",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 22920,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "NSFW"
+        ],
+        "version": 3,
+        "internalName": "Hanime",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Hanime.cs3",
+        "name": "Hanime"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://sweetiepieparenting.com&sz=%size%",
+        "fileHash": "sha256-ecb22e19b3ab9f4ff093569eef3564d17022496ef26fd797466ae41898b17a7d",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 30725,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 2,
+        "internalName": "Idlix",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Idlix.cs3",
+        "name": "Idlix"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://kuramanime.ink&sz=%size%",
+        "fileHash": "sha256-cd0ce1ef80451d60bb623d89670ab4e5a5e6abc80a31363bafe317d2a379bab3",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 24051,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "OVA",
+            "Anime"
+        ],
+        "version": 2,
+        "internalName": "Kuramanime",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Kuramanime.cs3",
+        "name": "Kuramanime"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://kuronime.sbs&sz=%size%",
+        "fileHash": "sha256-6228d9c1b85bd3773a93dce45038d9b0251c27a26870b4663b3e3e24cfab8f41",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 17889,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "OVA",
+            "Anime"
+        ],
+        "version": 1,
+        "internalName": "Kuronime",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Kuronime.cs3",
+        "name": "Kuronime"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://themoviebox.org&sz=%size%",
+        "fileHash": "sha256-5d266a5d91536114e52668a75ed7a191884df7e6a4ffa50041ff9ea5f5f2352a",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 35071,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "Anime",
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 2,
+        "internalName": "MovieBox",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/MovieBox.cs3",
+        "name": "MovieBox"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://nekopoi.care&sz=%size%",
+        "fileHash": "sha256-7ae4ade3ea563f9311c1b531f7afe247963e096b638d75caa8b8a4c06ac35790",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 23237,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "NSFW"
+        ],
+        "version": 1,
+        "internalName": "Nekopoi",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Nekopoi.cs3",
+        "name": "Nekopoi"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://nimegami.id&sz=%size%",
+        "fileHash": "sha256-bf0d7d3c455f21db0e75b19c9dd9edef3b80987608ab14133ed8041bf79390ce",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 27349,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "OVA",
+            "Anime"
+        ],
+        "version": 1,
+        "internalName": "Nimegami",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Nimegami.cs3",
+        "name": "Nimegami"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://oploverz.ch&sz=%size%",
+        "fileHash": "sha256-2ae1e94f8c1e3b17ca692124c7c52ac8c505850b2e3a61e60c711b75a94ded3d",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 22516,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "OVA",
+            "Anime"
+        ],
+        "version": 1,
+        "internalName": "Oploverz",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Oploverz.cs3",
+        "name": "Oploverz"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://otakudesu.blog&sz=%size%",
+        "fileHash": "sha256-0d9c487fddb6f0ee8f8832cece3dec12c82d590e01537d336757ca0a67f629e4",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 25086,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "OVA",
+            "Anime"
+        ],
+        "version": 1,
+        "internalName": "Otakudesu",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Otakudesu.cs3",
+        "name": "Otakudesu"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://pahe.ink&sz=%size%",
+        "fileHash": "sha256-65abeaf10095a297f0893ae82aa366dd73f2771478d6d01ad9212743f127a733",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 12679,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "Pahe",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Pahe.cs3",
+        "name": "Pahe"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=http://159.89.250.250&sz=%size%",
+        "fileHash": "sha256-dd1c17e92b6365022f1add388299f8c509881f6854bafb492c2a3a894066373d",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 18509,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "Rebahin",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/Rebahin.cs3",
+        "name": "Rebahin"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=http://167.71.237.49&sz=%size%",
+        "fileHash": "sha256-35de2780258d4f502f20f3ab15852964f63bb35a3b1dcb5d553f8505acfbc188",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 15783,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "ExtremeBoy"
+        ],
+        "tvTypes": [
+            "NSFW"
+        ],
+        "version": 1,
+        "internalName": "SemiRebahin",
+        "url": "https://raw.githubusercontent.com/ExtremeBoyGG/nonton-indo/builds/SemiRebahin.cs3",
+        "name": "SemiRebahin"
+    }
+]
