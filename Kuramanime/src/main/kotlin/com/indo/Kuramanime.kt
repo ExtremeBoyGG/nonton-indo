@@ -102,27 +102,42 @@ class Kuramanime : MainAPI() {
             .map { it.text().replace(",", "").trim() }
             .filter { it.isNotBlank() }
 
-        // Episodes are HTML-encoded inside the data-content attribute of a#episodeLists
-        // e.g. data-content="&lt;a class='btn ...' href='...episode/1'&gt;Ep 1&lt;/a&gt;..."
-        val episodeHtml = doc.selectFirst("a#episodeLists")?.attr("data-content") ?: ""
-        val epDoc = Jsoup.parse(episodeHtml)
-        val episodes = epDoc.select("a[href*=/episode/]").mapNotNull { a ->
-            val epHref = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val epText = a.text().trim().ifBlank { null } ?: return@mapNotNull null
-            // Extract episode number from URL
-            val epNum = Regex("/episode/(\\d+)").find(epHref)
-                ?.groupValues?.getOrNull(1)?.toIntOrNull()
-            newEpisode(fixUrl(epHref)) {
-                this.name = "Episode ${epNum ?: epText}"
-                this.episode = epNum
+        val episodes = mutableListOf<Episode>()
+        var currentDoc = doc
+
+        while (true) {
+            val episodeHtml = currentDoc.selectFirst("a#episodeLists")?.attr("data-content") ?: ""
+            val epDoc = Jsoup.parse(episodeHtml)
+
+            epDoc.select("a[href*=/episode/]").forEach { a ->
+                val epHref = a.attr("href").ifBlank { null } ?: return@forEach
+                val epText = a.text().trim().ifBlank { null } ?: return@forEach
+                if (epText.contains("Terlama") || epText.contains("Terbaru")) return@forEach
+
+                val epNum = Regex("/episode/(\\d+)").find(epHref)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                episodes.add(
+                    newEpisode(fixUrl(epHref)) {
+                        this.name = "Episode ${epNum ?: epText}"
+                        this.episode = epNum
+                    }
+                )
             }
-        }.distinctBy { it.data }.sortedBy { it.episode }
+
+            val nextPagePath = epDoc.selectFirst("a.page__link__episode:has(i.fa-forward)")?.attr("href")
+            if (nextPagePath != null) {
+                currentDoc = app.get(fixUrl(nextPagePath)).document
+            } else {
+                break
+            }
+        }
+
+        val sortedEpisodes = episodes.distinctBy { it.data }.sortedBy { it.episode }
 
         return newAnimeLoadResponse(title, animeUrl, TvType.Anime) {
             this.posterUrl = poster
             this.plot = description
             this.tags = genres
-            addEpisodes(DubStatus.Subbed, episodes)
+            addEpisodes(DubStatus.Subbed, sortedEpisodes)
         }
     }
 
