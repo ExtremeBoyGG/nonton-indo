@@ -150,7 +150,20 @@ class Kuramanime : MainAPI() {
             )
         }
 
-        val downloadSection = doc.selectFirst("div#animeDownloadLink")
+        val postUrl = "$data?Ub3BzhijicHXZdv=sSpyhnlQpR&C2XAPerzX1BM7V9=kuramadrive&page=1"
+        val postDoc = app.post(
+            postUrl,
+            headers = mapOf(
+                "Accept" to "*/*",
+                "X-Requested-With" to "XMLHttpRequest",
+                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8"
+            ),
+            data = mapOf("authorization" to "qDBDmoKgQIdP6wmFGUCDo3vuVg9FBfV98")
+        ).document
+
+        // The POST response might directly be the content of animeDownloadLink or wrap it.
+        // Let's check both the root and div#animeDownloadLink
+        val downloadSection = postDoc.selectFirst("div#animeDownloadLink") ?: postDoc.body()
         if (downloadSection != null) {
             var currentQuality = Qualities.Unknown.value
 
