@@ -6,6 +6,9 @@ import org.jsoup.Jsoup
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 class Kuramanime : MainAPI() {
     override var mainUrl = "https://v17.kuramanime.ink"
@@ -155,16 +158,6 @@ class Kuramanime : MainAPI() {
             loadExtractor(fullSrc, data, subtitleCallback, callback)
         }
 
-        doc.getElementsByTag("source").forEach { source ->
-            val src = source.attr("src").ifBlank { null } ?: return@forEach
-            callback.invoke(
-                newExtractorLink(this.name, this.name, src) {
-                    this.referer = data
-                    this.quality = Qualities.Unknown.value
-                }
-            )
-        }
-
         val postUrl = "$data?Ub3BzhijicHXZdv=sSpyhnlQpR&C2XAPerzX1BM7V9=kuramadrive&page=1"
         val postDoc = app.post(
             postUrl,
@@ -180,56 +173,65 @@ class Kuramanime : MainAPI() {
         // Let's check both the root and div#animeDownloadLink
         val downloadSection = postDoc.selectFirst("div#animeDownloadLink") ?: postDoc.body()
         if (downloadSection != null) {
-            var currentQuality = Qualities.Unknown.value
+            coroutineScope {
+                var currentQuality = Qualities.Unknown.value
+                val deferredLinks = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
 
-            downloadSection.children().forEach { element ->
-                if (element.tagName() == "h6") {
-                    val currentQualityText = element.text()
-                    currentQuality = when {
-                        currentQualityText.contains("1080") -> Qualities.P1080.value
-                        currentQualityText.contains("720") -> Qualities.P720.value
-                        currentQualityText.contains("480") -> Qualities.P480.value
-                        currentQualityText.contains("360") -> Qualities.P360.value
-                        else -> Qualities.Unknown.value
-                    }
-                } else if (element.tagName() == "a") {
-                    val href = element.attr("href").ifBlank { null } ?: return@forEach
-                    val serverName = element.text().trim()
+                downloadSection.children().forEach { element ->
+                    if (element.tagName() == "h6") {
+                        val currentQualityText = element.text()
+                        currentQuality = when {
+                            currentQualityText.contains("1080") -> Qualities.P1080.value
+                            currentQualityText.contains("720") -> Qualities.P720.value
+                            currentQualityText.contains("480") -> Qualities.P480.value
+                            currentQualityText.contains("360") -> Qualities.P360.value
+                            else -> Qualities.Unknown.value
+                        }
+                    } else if (element.tagName() == "a") {
+                        val href = element.attr("href").ifBlank { null } ?: return@forEach
+                        val serverName = element.text().trim()
+                        val capturedQuality = currentQuality
 
-                    if (href.contains("pixeldrain.com")) {
-                        val pdId = Regex("pixeldrain\\.com/d/(\\w+)").find(href)?.groupValues?.getOrNull(1)
-                            ?: Regex("pixeldrain\\.com/u/(\\w+)").find(href)?.groupValues?.getOrNull(1)
-                        if (pdId != null) {
-                            callback(newExtractorLink("PixelDrain", "PixelDrain", "https://pixeldrain.com/api/file/$pdId") {
-                                this.quality = currentQuality
-                                this.referer = data
+                        if (href.contains("pixeldrain.com")) {
+                            val pdId = Regex("pixeldrain\\.com/d/(\\w+)").find(href)?.groupValues?.getOrNull(1)
+                                ?: Regex("pixeldrain\\.com/u/(\\w+)").find(href)?.groupValues?.getOrNull(1)
+                            if (pdId != null) {
+                                callback(newExtractorLink("PixelDrain", "PixelDrain", "https://pixeldrain.com/api/file/$pdId") {
+                                    this.quality = capturedQuality
+                                    this.referer = data
+                                })
+                            }
+                        } else if (serverName.contains("kDrive", ignoreCase = true) || serverName.contains("kTurbo", ignoreCase = true)) {
+                            deferredLinks.add(async {
+                                try {
+                                    val kdriveDoc = app.get(href).document
+                                    val filename = kdriveDoc.selectFirst("h2.drive-file-label")?.text()?.trim()
+                                    val dataDomain = kdriveDoc.selectFirst("button.check-status")?.attr("data-domain")
+
+                                    if (dataDomain != null && filename != null) {
+                                        val path = java.net.URI(href).path
+                                        val encodedFilename = java.net.URLEncoder.encode(filename, "UTF-8").replace("+", "%20")
+                                        val streamUrl = "${dataDomain.trimEnd('/')}$path/$encodedFilename"
+
+                                        callback.invoke(
+                                            newExtractorLink("KuramaDrive", serverName, streamUrl) {
+                                                this.referer = ""
+                                                this.quality = capturedQuality
+                                            }
+                                        )
+                                    }
+                                } catch (e: Exception) {
+                                    // Ignore fetch errors
+                                }
+                            })
+                        } else {
+                            deferredLinks.add(async {
+                                loadExtractor(href, data, subtitleCallback, callback)
                             })
                         }
-                    } else if (serverName.contains("kDrive", ignoreCase = true) || serverName.contains("kTurbo", ignoreCase = true)) {
-                        try {
-                            val kdriveDoc = app.get(href).document
-                            val filename = kdriveDoc.selectFirst("h2.drive-file-label")?.text()?.trim()
-                            val dataDomain = kdriveDoc.selectFirst("button.check-status")?.attr("data-domain")
-
-                            if (dataDomain != null && filename != null) {
-                                val path = java.net.URI(href).path
-                                val encodedFilename = java.net.URLEncoder.encode(filename, "UTF-8").replace("+", "%20")
-                                val streamUrl = "${dataDomain.trimEnd('/')}$path/$encodedFilename"
-
-                                callback.invoke(
-                                    newExtractorLink("KuramaDrive", serverName, streamUrl) {
-                                        this.referer = ""
-                                        this.quality = currentQuality
-                                    }
-                                )
-                            }
-                        } catch (e: Exception) {
-                            // Ignore fetch errors
-                        }
-                    } else {
-                        loadExtractor(href, data, subtitleCallback, callback)
                     }
                 }
+                deferredLinks.awaitAll()
             }
         }
 
