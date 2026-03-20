@@ -2,6 +2,7 @@ package com.indo
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import org.jsoup.Jsoup
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
@@ -101,17 +102,18 @@ class Kuramanime : MainAPI() {
             .map { it.text().replace(",", "").trim() }
             .filter { it.isNotBlank() }
 
-        // Episodes: links with /episode/ in href
-        // These are <a> tags inside the episode list area with btn classes
-        val episodes = doc.select("a[href*=/episode/]").mapNotNull { a ->
+        // Episodes are HTML-encoded inside the data-content attribute of a#episodeLists
+        // e.g. data-content="&lt;a class='btn ...' href='...episode/1'&gt;Ep 1&lt;/a&gt;..."
+        val episodeHtml = doc.selectFirst("a#episodeLists")?.attr("data-content") ?: ""
+        val epDoc = Jsoup.parse(episodeHtml)
+        val episodes = epDoc.select("a[href*=/episode/]").mapNotNull { a ->
             val epHref = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            if (!epHref.contains("/anime/")) return@mapNotNull null
             val epText = a.text().trim().ifBlank { null } ?: return@mapNotNull null
             // Extract episode number from URL
             val epNum = Regex("/episode/(\\d+)").find(epHref)
                 ?.groupValues?.getOrNull(1)?.toIntOrNull()
             newEpisode(fixUrl(epHref)) {
-                this.name = "Episode $epText"
+                this.name = "Episode ${epNum ?: epText}"
                 this.episode = epNum
             }
         }.distinctBy { it.data }.sortedBy { it.episode }
