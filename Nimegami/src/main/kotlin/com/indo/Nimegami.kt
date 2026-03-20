@@ -167,9 +167,11 @@ class Nimegami : MainAPI() {
                 decodeStreamData(streamB64).forEach { entry ->
                     val format = entry.format ?: return@forEach
                     val quality = parseQuality(format)
-                    entry.url?.forEach { streamUrl ->
+                    val urls = entry.url ?: return@forEach
+                    urls.forEachIndexed { idx, streamUrl ->
                         if (streamUrl.isNotBlank()) {
-                            callback(newExtractorLink("Nimegami Stream", "Stream", streamUrl) {
+                            val serverLabel = if (urls.size > 1) "Server ${idx + 1}" else "Stream"
+                            callback(newExtractorLink("Nimegami", "$format $serverLabel", streamUrl) {
                                 this.quality = quality
                                 this.referer = pageUrl
                             })
@@ -194,9 +196,11 @@ class Nimegami : MainAPI() {
                 decodeStreamData(streamB64).forEach { entry ->
                     val format = entry.format ?: return@forEach
                     val quality = parseQuality(format)
-                    entry.url?.forEach { streamUrl ->
+                    val urls = entry.url ?: return@forEach
+                    urls.forEachIndexed { idx, streamUrl ->
                         if (streamUrl.isNotBlank()) {
-                            callback(newExtractorLink("Nimegami Stream", "Stream", streamUrl) {
+                            val serverLabel = if (urls.size > 1) "Server ${idx + 1}" else "Stream"
+                            callback(newExtractorLink("Nimegami", "$format $serverLabel", streamUrl) {
                                 this.quality = quality
                                 this.referer = pageUrl
                             })

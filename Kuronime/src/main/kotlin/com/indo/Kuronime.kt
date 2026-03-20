@@ -19,94 +19,104 @@ class Kuronime : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    // Homepage with three sections: New Episodes, Top Episodes Of The Week, New Anime Series
+    // Homepage with paginated new episodes + sidebar sections
     override val mainPage = mainPageOf(
-        "$mainUrl/" to "New Episodes",
-        "$mainUrl/" to "Top Episodes Of The Week",
-        "$mainUrl/" to "New Anime Series"
+        "$mainUrl/page/" to "New Episodes"
     )
 
     private fun episodeToAnimeUrl(url: String): String {
         // Example: /nonton-yuusha-party-wo-oidasareta-kiyoubinbou-episode-12/
         // => /anime/yuusha-party-wo-oidasareta-kiyoubinbou/
         val path = url.trimEnd('/').substringAfterLast("/")
+        // Remove "nonton-" prefix
+        val withoutPrefix = if (path.startsWith("nonton-")) path.removePrefix("nonton-") else path
         // Remove -episode-<number> and everything after
         val slug = try {
-            Regex("-episode-\\d+.*$", RegexOption.IGNORE_CASE).replace(path, "")
+            Regex("-episode-\\d+.*$", RegexOption.IGNORE_CASE).replace(withoutPrefix, "")
         } catch (e: PatternSyntaxException) {
-            // Fallback: split
-            val idx = path.indexOf("-episode-", ignoreCase = true)
-            if (idx != -1) path.substring(0, idx) else path
+            val idx = withoutPrefix.indexOf("-episode-", ignoreCase = true)
+            if (idx != -1) withoutPrefix.substring(0, idx) else withoutPrefix
         }
         return "$mainUrl/anime/$slug/"
     }
 
-    private fun parseArticleList(container: org.jsoup.nodes.Element): List<Triple<String, String?, String?>> {
-        return container.select("article.bsu").mapNotNull { article ->
-            val link = article.selectFirst("div.bsux a[href]") ?: return@mapNotNull null
-            val href = link.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val animeUrl = episodeToAnimeUrl(href)
-            val title = article.selectFirst("div.bsux h2")?.text()?.trim()
-                    ?: article.selectFirst("h2")?.text()?.trim()
-                    ?: return@mapNotNull null
-            val cleanTitle = title.replace(Regex("\\s*Episode\\s*\\d+.*$", RegexOption.IGNORE_CASE), "")
-                    .trim()
-                    .ifBlank { title }
-            val poster = article.selectFirst("img[itemprop='image']")?.attr("src")
-                    ?: article.selectFirst("img")?.attr("src")
-                    ?: null
-            val epNumText = article.selectFirst("div.ep")?.text()?.trim()
-            val epNum = epNumText?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
-            Triple(cleanTitle, poster, animeUrl)
-        }
-    }
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (page != 1) {
-            // Only page 1 has the three sections
-            return newHomePageResponse(request.name, emptyList())
-        }
-        val document = app.get(mainUrl).document
-        val listUps = document.select("div.listupd")
-        // Determine which listupd index based on section name
-        val index = when (request.name) {
-            "New Episodes" -> 0
-            "Top Episodes Of The Week" -> 1
-            "New Anime Series" -> 2
-            else -> 0 // fallback to first
-        }
-        val container = if (listUps.size > index) listUps.get(index) else null
-        val items = if (container != null) {
-            parseArticleList(container).mapNotNull { (title, poster, animeUrl) ->
-                val animeUrlFix = episodeToAnimeUrl(animeUrl ?: return@mapNotNull null)
-                newAnimeSearchResponse(title, animeUrlFix, TvType.Anime) {
-                    this.posterUrl = poster
-                }
+        val document = app.get(request.data + page).document
+
+        // Items are div.bs inside div.listupd
+        val items = document.select("div.listupd div.bs").mapNotNull { item ->
+            val a = item.selectFirst("a[href]") ?: return@mapNotNull null
+            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+
+            // Title from div.tt h2 or just h2 inside the item
+            val title = item.selectFirst("div.tt h2")?.text()?.trim()
+                ?: item.selectFirst("h2")?.text()?.trim()
+                ?: return@mapNotNull null
+
+            // Clean title: remove "Episode X Subtitle Indonesia" suffix
+            val cleanTitle = title
+                .replace(Regex("\\s*Episode\\s*\\d+.*$", RegexOption.IGNORE_CASE), "")
+                .trim()
+                .ifBlank { title }
+
+            // Poster from img inside div.limit
+            val poster = item.selectFirst("div.limit img")?.let { img ->
+                img.attr("data-src").ifBlank { null }
+                    ?: img.attr("src").ifBlank { null }
+            } ?: item.selectFirst("img")?.let { img ->
+                img.attr("data-src").ifBlank { null }
+                    ?: img.attr("src").ifBlank { null }
             }
-        } else {
-            emptyList()
-        }
+
+            // Sub/Dub info from span.sb or div.typez
+            val subInfo = item.selectFirst("span.sb, div.typez")?.text()?.trim()
+            val isSub = subInfo?.contains("Sub", ignoreCase = true) != false
+
+            // Episode number from span.ep or div.ep
+            val epNumText = item.selectFirst("span.ep, div.ep")?.text()?.trim()
+            val epNum = epNumText?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+
+            // Convert episode URL to anime URL
+            val animeUrl = episodeToAnimeUrl(href)
+
+            newAnimeSearchResponse(cleanTitle, animeUrl, TvType.Anime) {
+                this.posterUrl = poster
+                epNum?.let { addSub(it) }
+            }
+        }.distinctBy { it.url }
+
         return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/?s=$query").document
-        return document.select("div.listupd article.bsu").mapNotNull { article ->
-            val link = article.selectFirst("div.bsux a[href]") ?: return@mapNotNull null
-            val href = link.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = article.selectFirst("div.bsux h2")?.text()?.trim()
-                    ?: article.selectFirst("h2")?.text()?.trim()
-                    ?: return@mapNotNull null
-            val cleanTitle = title.replace(Regex("\\s*Episode\\s*\\d+.*$", RegexOption.IGNORE_CASE), "")
-                    .trim()
-                    .ifBlank { title }
-            val poster = article.selectFirst("img[itemprop='image']")?.attr("src")
-                    ?: article.selectFirst("img")?.attr("src")
-                    ?: null
-            val epNumText = article.selectFirst("div.ep")?.text()?.trim()
+        return document.select("div.listupd div.bs").mapNotNull { item ->
+            val a = item.selectFirst("a[href]") ?: return@mapNotNull null
+            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+
+            val title = item.selectFirst("div.tt h2")?.text()?.trim()
+                ?: item.selectFirst("h2")?.text()?.trim()
+                ?: return@mapNotNull null
+
+            val cleanTitle = title
+                .replace(Regex("\\s*Episode\\s*\\d+.*$", RegexOption.IGNORE_CASE), "")
+                .trim()
+                .ifBlank { title }
+
+            val poster = item.selectFirst("div.limit img")?.let { img ->
+                img.attr("data-src").ifBlank { null }
+                    ?: img.attr("src").ifBlank { null }
+            } ?: item.selectFirst("img")?.let { img ->
+                img.attr("data-src").ifBlank { null }
+                    ?: img.attr("src").ifBlank { null }
+            }
+
+            val epNumText = item.selectFirst("span.ep, div.ep")?.text()?.trim()
             val epNum = epNumText?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+
             val animeUrl = episodeToAnimeUrl(href)
-            newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
+
+            newAnimeSearchResponse(cleanTitle, animeUrl, TvType.Anime) {
                 this.posterUrl = poster
                 epNum?.let { addSub(it) }
             }
@@ -114,67 +124,66 @@ class Kuronime : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        // If URL is episode, find anime page
-        val isAnimePage = url.contains("/anime/")
-        val (animeUrl, episodeDoc) = if (isAnimePage) {
-            Pair(url, null)
+        // If URL is episode, convert to anime page
+        val animeUrl = if (url.contains("/anime/")) {
+            url
         } else {
-            // Fetch episode page to get "All Episodes" link
-            val doc = app.get(url).document
-            val allEpLink = doc.selectFirst("div.navi a[href*='/anime/']")
-                ?: doc.selectFirst("a[href*='/anime/']")
-            val animeLink = allEpLink?.attr("href")?.ifBlank { null }?.let { fixUrl(it) }
-                ?: episodeToAnimeUrl(url) // fallback
-            Pair(animeLink, doc)
+            episodeToAnimeUrl(url)
         }
 
         val document = app.get(animeUrl).document
 
-        // Title
-        val title = document.selectFirst("h1.entry-title, h1.title, h2.title, h1, h2")?.text()?.trim()
-            ?.replace(Regex("\\s*Subtitle Indonesia.*", RegexOption.IGNORE_CASE), "")
-            ?.replace(Regex("\\s*Sub\\s*Indo.*", RegexOption.IGNORE_CASE), "")
-            ?.trim()
+        // Title: h1.entry-title
+        val title = document.selectFirst("h1.entry-title")?.text()?.trim()
+            ?: document.selectFirst("h1")?.text()?.trim()
             ?: throw ErrorLoadingException("Title not found")
 
-        // Poster: Prefer meta image or detail img
-        val poster = document.selectFirst("div.detail img, div.thumb img, meta[property='og:image']")
-            ?.attr("src")?.ifBlank { null }
-            ?.let { fixUrl(it) }
+        val cleanTitle = title
+            .replace(Regex("\\s*Subtitle Indonesia.*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*Sub\\s*Indo.*", RegexOption.IGNORE_CASE), "")
+            .trim()
 
-        // Description: meta description or content
-        val description = document.selectFirst("meta[name='description']")?.attr("content")
-            ?: document.selectFirst("div.entry-content p, div.detail p, p.des")?.text()?.trim()
+        // Poster: thumb or detail image
+        val poster = document.selectFirst("div.thumb img, div.ime img")?.let { img ->
+            img.attr("data-src").ifBlank { null }
+                ?: img.attr("src").ifBlank { null }
+        } ?: document.selectFirst("meta[property=og:image]")?.attr("content")?.ifBlank { null }
 
-        // Genres: Usually in div.detail li a or .genres
-        val genres = document.select("div.detail li a, div.genres a, .genre a")
+        // Description from div.entry-content or synopis area
+        val description = document.selectFirst("div.entry-content p, div.synp p, div.desc p")?.text()?.trim()
+            ?: document.selectFirst("meta[name=description]")?.attr("content")
+
+        // Genres
+        val genres = document.select("div.genxed a, a[href*=/genres/]")
             .map { it.text().trim() }
             .filter { it.isNotBlank() }
 
-        // Episodes: Look for div.ep a[href] (each episode link)
-        val episodes = document.select("div.ep a[href]").mapNotNull { a ->
+        // Episodes: listed as li with a[href] inside the episode list area
+        // The episode section has links like /nonton-{slug}-episode-{N}/
+        val episodes = document.select("div.eplister ul li a[href], div.episodelist ul li a[href]").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val epText = a.text().trim()
-            val epNum = epText.toIntOrNull() ?: Regex("(\\d+)").find(href.trimEnd('/').substringAfterLast("/"))?.groupValues?.getOrNull(1)?.toIntOrNull()
+            if (!href.contains("nonton-") && !href.contains("episode")) return@mapNotNull null
+            val epText = a.selectFirst("div.epl-num")?.text()?.trim()
+                ?: a.text().trim().ifBlank { null }
+                ?: return@mapNotNull null
+            val epNum = Regex("(\\d+)").find(
+                epText.replace(Regex("Episode\\s*", RegexOption.IGNORE_CASE), "")
+            )?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: Regex("episode-(\\d+)", RegexOption.IGNORE_CASE).find(href)
+                    ?.groupValues?.getOrNull(1)?.toIntOrNull()
             newEpisode(fixUrl(href)) {
-                this.name = "Episode $epText"
+                this.name = "Episode ${epNum ?: epText}"
                 this.episode = epNum
             }
-        }.sortedBy { it.episode }
+        }.distinctBy { it.data }.sortedBy { it.episode }
 
-        // Extract MAL/AniList IDs: Possibly in meta tags? If not available, skip
-        val malId = document.selectFirst("meta[property='og:video:series']")?.attr("content")?.toIntOrNull()
-        val aniId = null // no data
-
-        // Build response
-        return newAnimeLoadResponse(title, animeUrl, TvType.Anime) {
-            engName = title
+        return newAnimeLoadResponse(cleanTitle, animeUrl, TvType.Anime) {
+            engName = cleanTitle
             posterUrl = poster
             backgroundPosterUrl = poster
             plot = description
             this.tags = genres.distinct()
-            addMalId(malId)
-            addAniListId(aniId?.toIntOrNull())
+            addEpisodes(DubStatus.Subbed, episodes)
         }
     }
 
@@ -196,18 +205,16 @@ class Kuronime : MainAPI() {
             ?.ifBlank { null }
 
         // Method 3: any iframe src that looks like player
-        val playerIframe = document.select("iframe[src*='player']").firstOrNull()?.attr("src")
+        val playerIframe = document.select("iframe[src]").firstOrNull()?.attr("src")?.ifBlank { null }
 
         val embedUrls = listOfNotNull(ogVideo, iframe, playerIframe).distinct()
 
         for (url in embedUrls) {
             val fullUrl = if (url.startsWith("//")) "https:$url" else url
-            // Pass to extractor
             loadExtractor(fullUrl, data, subtitleCallback, callback)
         }
 
         // ---- Download links (krakenfiles, pixeldrain) ----
-        // Krakenfiles: extract video URL directly from the page
         document.select("a[href]").forEach { a ->
             val href = a.attr("href").ifBlank { null } ?: return@forEach
             when {
@@ -218,13 +225,12 @@ class Kuronime : MainAPI() {
                             ?.attr("src")?.ifBlank { null }
                         if (videoUrl != null) {
                             callback(newExtractorLink("KrakenFiles", "Download", videoUrl) {
-                                this.quality = Qualities.Unknown.value // Krakenfiles usually HD
+                                this.quality = Qualities.Unknown.value
                                 this.referer = href
                             })
                         }
                     } catch (_: Exception) { }
                 }
-                // PixelDrain: use direct API download URL
                 href.contains("pixeldrain.com") -> {
                     val pdId = Regex("pixeldrain\\.com/u/(\\w+)").find(href)?.groupValues?.getOrNull(1)
                     if (pdId != null) {
