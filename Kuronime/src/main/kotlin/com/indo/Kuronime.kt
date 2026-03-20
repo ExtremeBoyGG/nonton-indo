@@ -41,7 +41,7 @@ class Kuronime : MainAPI() {
         return "$mainUrl/anime/$slug/"
     }
 
-    private fun parseArticleList(container: org.jsoup.nodes.Element): List<Triple<String, String, String?, Int?>> {
+    private fun parseArticleList(container: org.jsoup.nodes.Element): List<Triple<String, String?, String?>> {
         return container.select("article.bsu").mapNotNull { article ->
             val link = article.selectFirst("div.bsux a[href]") ?: return@mapNotNull null
             val href = link.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -57,7 +57,7 @@ class Kuronime : MainAPI() {
                     ?: null
             val epNumText = article.selectFirst("div.ep")?.text()?.trim()
             val epNum = epNumText?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
-            Triple(cleanTitle, animeUrl, poster, epNum)
+            Triple(cleanTitle, poster, animeUrl)
         }
     }
 
@@ -75,13 +75,12 @@ class Kuronime : MainAPI() {
             "New Anime Series" -> 2
             else -> 0 // fallback to first
         }
-        val container = if (listUps.size() > index) listUps.get(index) else null
+        val container = if (listUps.size > index) listUps.get(index) else null
         val items = if (container != null) {
-            parseArticleList(container).mapNotNull { (title, animeUrl, poster, epNum) ->
-                val animeUrlFix = episodeToAnimeUrl(animeUrl)
+            parseArticleList(container).mapNotNull { (title, poster, animeUrl) ->
+                val animeUrlFix = episodeToAnimeUrl(animeUrl ?: return@mapNotNull null)
                 newAnimeSearchResponse(title, animeUrlFix, TvType.Anime) {
                     this.posterUrl = poster
-                    epNum?.let { addSub(it) }
                 }
             }
         } else {
@@ -241,19 +240,4 @@ class Kuronime : MainAPI() {
         return true
     }
 
-    // Helper: convert episode URL to anime page URL
-    private fun episodeToAnimeUrl(url: String): String {
-        // Example: /nonton-yuusha-party-wo-oidasareta-kiyoubinbou-episode-12/
-        // => /anime/yuusha-party-wo-oidasareta-kiyoubinbou/
-        val path = url.trimEnd('/').substringAfterLast("/")
-        // Remove -episode-<number> and everything after
-        val slug = try {
-            Regex("-episode-\\d+.*$", RegexOption.IGNORE_CASE).replace(path, "")
-        } catch (e: PatternSyntaxException) {
-            // Fallback: split
-            val idx = path.indexOf("-episode-", ignoreCase = true)
-            if (idx != -1) path.substring(0, idx) else path
-        }
-        return "$mainUrl/anime/$slug/"
-    }
 }
