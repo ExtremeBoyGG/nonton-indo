@@ -147,11 +147,69 @@ class Kuramanime : MainAPI() {
                     source = this.name,
                     name = this.name,
                     url = src,
-                ) {
-                    this.referer = data
-                    this.quality = Qualities.Unknown.value
-                }
+                    referer = data,
+                    quality = Qualities.Unknown.value
+                )
             )
+        }
+
+        val downloadSection = doc.selectFirst("div#animeDownloadLink")
+        if (downloadSection != null) {
+            var currentQuality = Qualities.Unknown.value
+
+            downloadSection.children().forEach { element ->
+                if (element.tagName() == "h6") {
+                    val currentQualityText = element.text()
+                    currentQuality = when {
+                        currentQualityText.contains("1080") -> Qualities.P1080.value
+                        currentQualityText.contains("720") -> Qualities.P720.value
+                        currentQualityText.contains("480") -> Qualities.P480.value
+                        currentQualityText.contains("360") -> Qualities.P360.value
+                        else -> Qualities.Unknown.value
+                    }
+                } else if (element.tagName() == "a") {
+                    val href = element.attr("href").ifBlank { null } ?: return@forEach
+                    val serverName = element.text().trim()
+
+                    if (href.contains("pixeldrain.com")) {
+                        val pdId = Regex("pixeldrain\\.com/d/(\\w+)").find(href)?.groupValues?.getOrNull(1)
+                            ?: Regex("pixeldrain\\.com/u/(\\w+)").find(href)?.groupValues?.getOrNull(1)
+                        if (pdId != null) {
+                            callback(newExtractorLink("PixelDrain", "PixelDrain", "https://pixeldrain.com/api/file/$pdId") {
+                                this.quality = currentQuality
+                                this.referer = data
+                            })
+                        }
+                    } else if (serverName.contains("kDrive", ignoreCase = true) || serverName.contains("kTurbo", ignoreCase = true)) {
+                        try {
+                            val kdriveDoc = app.get(href).document
+                            val filename = kdriveDoc.selectFirst("h2.drive-file-label")?.text()?.trim()
+                            val dataDomain = kdriveDoc.selectFirst("button.check-status")?.attr("data-domain")
+
+                            if (dataDomain != null && filename != null) {
+                                val path = java.net.URI(href).path
+                                val encodedFilename = java.net.URLEncoder.encode(filename, "UTF-8").replace("+", "%20")
+                                val streamUrl = "${dataDomain.trimEnd('/')}$path/$encodedFilename"
+
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = "KuramaDrive",
+                                        name = serverName,
+                                        url = streamUrl,
+                                        referer = "",
+                                        quality = currentQuality,
+                                        isM3u8 = false
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            // Ignore fetch errors
+                        }
+                    } else {
+                        loadExtractor(href, data, subtitleCallback, callback)
+                    }
+                }
+            }
         }
 
         return true
