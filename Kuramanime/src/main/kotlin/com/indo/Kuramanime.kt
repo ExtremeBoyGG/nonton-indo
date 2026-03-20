@@ -41,8 +41,14 @@ class Kuramanime : MainAPI() {
             // Strip episode path from URL to get anime page URL
             val animeUrl = href.replace(Regex("/episode/\\d+.*$"), "")
 
+            // Episode count from text like "Ep 13 / 26" inside the card
+            val itemText = item.text()
+            val epNum = Regex("Ep\\s*(\\d+)", RegexOption.IGNORE_CASE)
+                .find(itemText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
             newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
                 this.posterUrl = poster
+                addSub(epNum)
             }
         }.distinctBy { it.url }
 
