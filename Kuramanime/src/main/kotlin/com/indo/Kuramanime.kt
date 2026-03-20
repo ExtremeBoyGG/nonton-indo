@@ -192,7 +192,6 @@ class Kuramanime : MainAPI() {
                                     newExtractorLink("KuramaDrive", serverName, streamUrl) {
                                         this.referer = ""
                                         this.quality = currentQuality
-                                        this.isM3u8 = false
                                     }
                                 )
                             }
