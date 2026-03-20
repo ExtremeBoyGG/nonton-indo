@@ -143,13 +143,10 @@ class Kuramanime : MainAPI() {
         doc.getElementsByTag("source").forEach { source ->
             val src = source.attr("src").ifBlank { null } ?: return@forEach
             callback.invoke(
-                newExtractorLink(
-                    source = this.name,
-                    name = this.name,
-                    url = src,
-                    referer = data,
-                    quality = Qualities.Unknown.value
-                )
+                newExtractorLink(this.name, this.name, src) {
+                    this.referer = data
+                    this.quality = Qualities.Unknown.value
+                }
             )
         }
 
@@ -192,14 +189,11 @@ class Kuramanime : MainAPI() {
                                 val streamUrl = "${dataDomain.trimEnd('/')}$path/$encodedFilename"
 
                                 callback.invoke(
-                                    newExtractorLink(
-                                        source = "KuramaDrive",
-                                        name = serverName,
-                                        url = streamUrl,
-                                        referer = "",
-                                        quality = currentQuality,
-                                        isM3u8 = false
-                                    )
+                                    newExtractorLink("KuramaDrive", serverName, streamUrl) {
+                                        this.referer = ""
+                                        this.quality = currentQuality
+                                        this.isM3u8 = false
+                                    }
                                 )
                             }
                         } catch (e: Exception) {
