@@ -1,9 +1,9 @@
 package com.indo
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class MovieBox : MainAPI() {
@@ -30,6 +30,10 @@ class MovieBox : MainAPI() {
 
     private suspend fun apiGet(path: String): String {
         return app.get("$apiBase$path", headers = baseHeaders).text
+    }
+
+    private suspend fun tokenGet(path: String): String {
+        return app.get("$mainUrl$path", headers = baseHeaders).text
     }
 
     private fun detailPathFromUrl(url: String): String {
@@ -167,10 +171,13 @@ class MovieBox : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        // Get auth token cookie via themoviebox.org proxy
+        tokenGet("/wefeed-h5-bff/app/get-latest-app-pkgs?app_name=moviebox")
+
         val detailPath = detailPathFromUrl(data)
         val sid = Regex("[?&](sid|id)=([^&]+)").find(data)?.groupValues?.getOrNull(2)
-        val se = Regex("[?&]se=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "1"
-        val ep = Regex("[?&]ep=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "1"
+        val se = Regex("[?&]se=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
+        val ep = Regex("[?&]ep=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
 
         val subjectId = if (!sid.isNullOrBlank()) sid else {
             val detRaw = apiGet("/wefeed-h5api-bff/detail?detailPath=$detailPath")
@@ -180,77 +187,36 @@ class MovieBox : MainAPI() {
             subject?.get("subjectId")?.toString().orEmpty()
         }
 
-        var found = false
+        if (subjectId.isBlank()) return false
 
-        // 1) Try API play first
-        if (subjectId.isNotBlank()) {
-            val playRaw = apiGet("/wefeed-h5api-bff/subject/play?subjectId=$subjectId&se=$se&ep=$ep&detailPath=$detailPath")
-            val playRoot = tryParseJson<Map<String, Any?>>(playRaw)
-            val playData = playRoot?.get("data") as? Map<*, *>
-            val hls = (playData?.get("hls") as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-            val streams = (playData?.get("streams") as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-            val all = hls + streams
+        val playRaw = tokenGet("/wefeed-h5api-bff/subject/play?subjectId=$subjectId&se=$se&ep=$ep&detailPath=$detailPath")
+        val playRoot = tryParseJson<Map<String, Any?>>(playRaw)
+        val playData = playRoot?.get("data") as? Map<*, *> ?: return false
+        val hasResource = playData["hasResource"] as? Boolean ?: false
+        if (!hasResource) return false
 
-            all.forEach { item ->
-                val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
-                val res = item["resolutions"]?.toString()
+        val streams = (playData["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+        val hls = (playData["hls"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+        val all = streams + hls
 
-                val q = when {
-                    (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
-                    (res ?: "").contains("720") || u.contains("720", true) -> Qualities.P720.value
-                    (res ?: "").contains("480") || u.contains("480", true) -> Qualities.P480.value
-                    (res ?: "").contains("360") || u.contains("360", true) -> Qualities.P360.value
-                    else -> Qualities.Unknown.value
-                }
+        all.forEach { item ->
+            val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
+            val res = item["resolutions"]?.toString()
 
-                found = true
-                callback(newExtractorLink(name, "$name ${res ?: "Auto"}", u) {
-                    this.quality = q
-                    this.referer = "$mainUrl/"
-                })
+            val q = when {
+                (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
+                (res ?: "").contains("720") || u.contains("720", true) -> Qualities.P720.value
+                (res ?: "").contains("480") || u.contains("480", true) -> Qualities.P480.value
+                (res ?: "").contains("360") || u.contains("360", true) -> Qualities.P360.value
+                else -> Qualities.Unknown.value
             }
+
+            callback(newExtractorLink(name, "$name ${res ?: "Auto"}", u) {
+                this.quality = q
+                this.referer = "$mainUrl/"
+            })
         }
 
-        // 2) Fallback: parse /movies page (MovieBox SSR) for all available links
-        if (!found) {
-            val moviesUrl = if (data.contains("/movies/")) data else "$mainUrl/movies/$detailPath?id=$subjectId&type=/movie/detail&detailSe=&detailEp=&lang=en"
-            val html = app.get(moviesUrl, headers = mapOf("User-Agent" to USER_AGENT)).text
-            val nuxt = Regex("""<script[^>]*id=\"__NUXT_DATA__\"[^>]*>([\\s\\S]*?)</script>""")
-                .find(html)
-                ?.groupValues
-                ?.getOrNull(1)
-                .orEmpty()
-
-            val strings = Regex("\"([^\"\\n\\r]{8,})\"").findAll(nuxt)
-                .map { it.groupValues[1] }
-                .toList()
-
-            val links = strings.filter {
-                it.startsWith("http") && (
-                    it.contains(".mp4", true) ||
-                    it.contains(".m3u8", true) ||
-                    it.contains("fzmovies", true) ||
-                    it.contains("macdn.aoneroom.com/media", true)
-                    )
-            }.distinct()
-
-            links.forEach { u ->
-                val q = when {
-                    u.contains("1080", true) -> Qualities.P1080.value
-                    u.contains("720", true) -> Qualities.P720.value
-                    u.contains("480", true) || u.contains("r480p", true) -> Qualities.P480.value
-                    u.contains("360", true) || u.contains("r360p", true) -> Qualities.P360.value
-                    else -> Qualities.Unknown.value
-                }
-
-                found = true
-                callback(newExtractorLink(name, name, u) {
-                    this.quality = q
-                    this.referer = "$mainUrl/"
-                })
-            }
-        }
-
-        return found
+        return all.isNotEmpty()
     }
 }
