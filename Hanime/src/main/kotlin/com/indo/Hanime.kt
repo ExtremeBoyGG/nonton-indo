@@ -103,7 +103,8 @@ class Hanime : MainAPI() {
                 if (videoUrl.isBlank()) return@forEach
                 val links = M3u8Helper.generateM3u8(
                     source = name,
-                    masterUrl = videoUrl,
+                    streamUrl = videoUrl,
+                    referer = "$mainUrl/",
                     headers = headers
                 )
                 if (links.isEmpty()) {
