@@ -37,8 +37,7 @@ class Playmogo : ExtractorApi() {
             newExtractorLink(name, name, videoUrl) {
                 this.referer = referer ?: url
                 this.quality = quality
-                this.addHeader("Referer", mainUrl)
-                this.addHeader("Origin", mainUrl)
+                this.headers = mapOf("Referer" to mainUrl, "Origin" to mainUrl)
             }
         )
     }
@@ -92,8 +91,7 @@ class Streampoi : ExtractorApi() {
             newExtractorLink(name, name, fileUrl) {
                 this.referer = referer ?: url
                 this.quality = quality
-                this.addHeader("Referer", mainUrl)
-                this.addHeader("Origin", mainUrl)
+                this.headers = mapOf("Referer" to mainUrl, "Origin" to mainUrl)
             }
         )
     }
