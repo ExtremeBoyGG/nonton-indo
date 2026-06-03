@@ -4,11 +4,8 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.lagradost.nicehttp.JsonAsString
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
 class Idlix : MainAPI() {
     override var mainUrl = "https://z2.idlixku.com"
@@ -266,10 +263,11 @@ class Idlix : MainAPI() {
             val gateToken = playInfo.optString("gateToken", "")
             if (gateToken.isBlank()) return false
 
-            val claimText = jsonPost(
+            val claimResp = app.post(
                 "$mainUrl/api/watch/session/claim",
-                """{"gateToken":"$gateToken"}"""
-            ) ?: return false
+                json = JsonAsString("""{"gateToken":"$gateToken"}""")
+            )
+            val claimText = claimResp.text ?: return false
             val claimJson = JSONObject(claimText)
             val redeemUrl = claimJson.optString("redeemUrl", "")
             val claim = claimJson.optString("claim", "")
@@ -277,10 +275,11 @@ class Idlix : MainAPI() {
 
             if (redeemUrl.isNotBlank() && claim.isNotBlank()) {
                 try {
-                    val pentosText = jsonPost(
+                    val pentosResp = app.post(
                         redeemUrl,
-                        """{"claim":"$claim"}"""
-                    ) ?: ""
+                        json = JsonAsString("""{"claim":"$claim"}""")
+                    )
+                    val pentosText = pentosResp.text ?: ""
                     val pentosJson = JSONObject(pentosText)
                     streamUrl = pentosJson.optString("url", "").ifBlank { null }
                     val subsArray = pentosJson.optJSONArray("subtitles")
@@ -315,24 +314,6 @@ class Idlix : MainAPI() {
         }
 
         return false
-    }
-
-    private suspend fun jsonPost(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): String? {
-        return withContext(Dispatchers.IO) {
-            try {
-                val conn = URL(url).openConnection() as HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.doOutput = true
-                conn.connectTimeout = 15000
-                conn.readTimeout = 15000
-                conn.setRequestProperty("Content-Type", "application/json")
-                headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
-                conn.outputStream.use { it.write(jsonBody.toByteArray(Charsets.UTF_8)) }
-                if (conn.responseCode in 200..299) {
-                    conn.inputStream.bufferedReader().readText()
-                } else null
-            } catch (_: Exception) { null }
-        }
     }
 
     private fun parseQuality(q: String): Int {
