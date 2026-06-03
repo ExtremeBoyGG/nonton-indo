@@ -176,13 +176,22 @@ class AnimeIndo : MainAPI() {
                     val videoSrc = playerDoc.selectFirst("source[src]")?.attr("src")
                         ?: playerDoc.selectFirst("video")?.attr("src")
                     if (!videoSrc.isNullOrBlank()) {
+                        val itag = Regex("[?&]itag=(\\d+)").find(videoSrc)
+                            ?.groupValues?.getOrNull(1)?.toIntOrNull()
+                        val quality = when (itag) {
+                            18 -> Qualities.P360.value
+                            22 -> Qualities.P720.value
+                            37 -> Qualities.P1080.value
+                            59 -> Qualities.P480.value
+                            else -> Qualities.Unknown.value
+                        }
                         callback(
                             newExtractorLink(
                                 "AnimeIndo",
                                 "B-TUBE",
                                 videoSrc
                             ) {
-                                this.quality = Qualities.P1080.value
+                                this.quality = quality
                                 this.referer = "https://www.blogger.com/"
                             }
                         )
@@ -195,17 +204,47 @@ class AnimeIndo : MainAPI() {
                     val fileMatch = Regex("\"file\"\\s*:\\s*\"([^\"]+)\"").find(html)
                     val filePath = fileMatch?.groupValues?.getOrNull(1)
                     if (!filePath.isNullOrBlank()) {
-                        val videoUrl = if (filePath.startsWith("/")) "https://xtwap.top$filePath" else filePath
-                        callback(
-                            newExtractorLink(
-                                "AnimeIndo",
-                                "CEPAT",
-                                videoUrl
-                            ) {
+                        val baseUrl = "https://xtwap.top"
+                        val masterUrl = if (filePath.startsWith("/")) "$baseUrl$filePath" else filePath
+
+                        try {
+                            val masterPlaylist = app.get(masterUrl).text
+                            val variantRegex = Regex("RESOLUTION=(\\d+)x(\\d+)\\s*\\n\\s*(\\S+)", setOf(RegexOption.IGNORE_CASE))
+                            val variants = variantRegex.findAll(masterPlaylist).mapNotNull { match ->
+                                val height = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+                                val path = match.groupValues[3].trim()
+                                val quality = when {
+                                    height >= 1080 -> Qualities.P1080.value
+                                    height >= 720 -> Qualities.P720.value
+                                    height >= 480 -> Qualities.P480.value
+                                    height >= 360 -> Qualities.P360.value
+                                    else -> Qualities.Unknown.value
+                                }
+                                val variantUrl = if (path.startsWith("http")) path
+                                else if (path.startsWith("/")) "$baseUrl$path"
+                                else "$baseUrl/$path"
+                                Pair(variantUrl, quality)
+                            }.toList()
+
+                            if (variants.isNotEmpty()) {
+                                variants.forEach { (url, quality) ->
+                                    callback(newExtractorLink("AnimeIndo", "CEPAT", url) {
+                                        this.quality = quality
+                                        this.referer = masterUrl
+                                    })
+                                }
+                            } else {
+                                callback(newExtractorLink("AnimeIndo", "CEPAT", masterUrl) {
+                                    this.quality = Qualities.P1080.value
+                                    this.referer = fullUrl
+                                })
+                            }
+                        } catch (_: Exception) {
+                            callback(newExtractorLink("AnimeIndo", "CEPAT", masterUrl) {
                                 this.quality = Qualities.P1080.value
                                 this.referer = fullUrl
-                            }
-                        )
+                            })
+                        }
                     }
                 } catch (_: Exception) {}
             } else {
