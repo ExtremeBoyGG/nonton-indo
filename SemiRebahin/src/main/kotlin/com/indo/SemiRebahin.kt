@@ -3,6 +3,7 @@ package com.indo
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class SemiRebahin : MainAPI() {
     override var mainUrl = "http://167.71.237.49"
