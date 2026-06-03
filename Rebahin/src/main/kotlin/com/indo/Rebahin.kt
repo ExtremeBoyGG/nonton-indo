@@ -179,7 +179,6 @@ class Rebahin : MainAPI() {
                 if (videoUrl != null) {
                     callback(newExtractorLink("Rebahin", "Rebahin - $quality", videoUrl) {
                         this.quality = parseQuality(quality)
-                        this.isM3u8 = videoUrl.contains(".m3u8", ignoreCase = true)
                     })
                 }
                 objPos = objEnd + 1
