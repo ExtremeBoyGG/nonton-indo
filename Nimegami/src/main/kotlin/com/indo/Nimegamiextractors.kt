@@ -50,8 +50,20 @@ class KrakenFiles : ExtractorApi() {
 
 class Berkasdrive : ExtractorApi() {
     override val name = "Berkasdrive"
-    override val mainUrl = "https://dlgan.space"
+    override val mainUrl = "https://dlgan.halahgan.com"
     override val requiresReferer = false
+
+    private fun parseQualityFromUrl(url: String): Int {
+        val nameParam = url.substringAfter("name=").substringBefore("&").substringBefore(".mp4")
+        return when {
+            nameParam.contains("1080") -> Qualities.P1080.value
+            nameParam.contains("720")  -> Qualities.P720.value
+            nameParam.contains("480")  -> Qualities.P480.value
+            nameParam.contains("360")  -> Qualities.P360.value
+            nameParam.contains("240")  -> Qualities.P240.value
+            else                       -> Qualities.Unknown.value
+        }
+    }
 
     override suspend fun getUrl(
         url: String,
@@ -61,12 +73,13 @@ class Berkasdrive : ExtractorApi() {
     ) {
         val response = app.get(url, allowRedirects = false)
         val location = response.headers["location"] ?: response.url
+        val quality = parseQualityFromUrl(url)
 
         if (location.contains(".mp4") || location.contains("videoplayback")) {
             callback.invoke(
                 newExtractorLink(name, name, location) {
                     this.referer = referer ?: url
-                    this.quality = Qualities.Unknown.value
+                    this.quality = quality
                 }
             )
         }

@@ -4,5 +4,9 @@ import com.lagradost.cloudstream3.plugins.Plugin
 import android.content.Context
 @CloudstreamPlugin
 class NimegamiPlugin : Plugin() {
-    override fun load(context: Context) { registerMainAPI(Nimegami()) }
+    override fun load(context: Context) {
+        registerMainAPI(Nimegami())
+        registerExtractorAPI(KrakenFiles())
+        registerExtractorAPI(Berkasdrive())
+    }
 }

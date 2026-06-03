@@ -162,7 +162,7 @@ class Nimegami : MainAPI() {
             }
 
             // Streaming dari li.select-eps (hanya 1 untuk movie)
-            val streamB64 = doc.selectFirst("li.select-eps")?.attr("data") ?: ""
+            val streamB64 = doc.selectFirst("li.select-eps")?.attr("data-stream") ?: ""
             if (streamB64.isNotBlank()) {
                 decodeStreamData(streamB64).forEach { entry ->
                     val format = entry.format ?: return@forEach
@@ -191,7 +191,7 @@ class Nimegami : MainAPI() {
             }
 
             // Streaming dari li.select-eps ke-N
-            val streamB64 = doc.select("li.select-eps").getOrNull(epIndex)?.attr("data") ?: ""
+            val streamB64 = doc.select("li.select-eps").getOrNull(epIndex)?.attr("data-stream") ?: ""
             if (streamB64.isNotBlank()) {
                 decodeStreamData(streamB64).forEach { entry ->
                     val format = entry.format ?: return@forEach
