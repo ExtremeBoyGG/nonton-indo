@@ -10,7 +10,7 @@ class Nekopoi : MainAPI() {
     override val hasMainPage = true
     override var lang = "id"
     override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
+    override val supportedTypes = setOf(TvType.NSFW)
 
     private val ua = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
@@ -31,7 +31,7 @@ class Nekopoi : MainAPI() {
             val title = a.selectFirst("div.title")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
             val style = a.selectFirst("div.nk-hentai-thumb")?.attr("style") ?: ""
             val poster = Regex("url\\('([^']+)'").find(style)?.groupValues?.getOrNull(1)
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(title, href, TvType.NSFW) {
                 this.posterUrl = poster
             }
         }.let { items ->
@@ -44,7 +44,7 @@ class Nekopoi : MainAPI() {
             val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
             val style = card.selectFirst("div.nk-thumb-crop")?.attr("style") ?: ""
             val poster = Regex("url\\('([^']+)'").find(style)?.groupValues?.getOrNull(1)
-            newMovieSearchResponse(title, href, TvType.Movie) {
+            newMovieSearchResponse(title, href, TvType.NSFW) {
                 this.posterUrl = poster
             }
         }.let { items ->
@@ -57,7 +57,7 @@ class Nekopoi : MainAPI() {
             val title = a.selectFirst("div.nk-jav-meta h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
             val style = li.selectFirst("div.nk-grid-thumb")?.attr("style") ?: ""
             val poster = Regex("url\\('([^']+)'").find(style)?.groupValues?.getOrNull(1)
-            newMovieSearchResponse(title, href, TvType.Movie) {
+            newMovieSearchResponse(title, href, TvType.NSFW) {
                 this.posterUrl = poster
             }
         }.let { items ->
@@ -75,11 +75,7 @@ class Nekopoi : MainAPI() {
             val title = el.selectFirst("div.nk-search-info h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
             val style = el.selectFirst("div.nk-search-thumb")?.attr("style") ?: ""
             val poster = Regex("url\\('([^']+)'").find(style)?.groupValues?.getOrNull(1)
-            val type = if (href.contains("/hentai/")) TvType.TvSeries else TvType.Movie
-            if (type == TvType.TvSeries)
-                newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = poster }
-            else
-                newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = poster }
+            newMovieSearchResponse(title, href, TvType.NSFW) { this.posterUrl = poster }
         }
     }
 
@@ -117,13 +113,13 @@ class Nekopoi : MainAPI() {
                     this.posterUrl = epPoster
                 }
             }
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+            newTvSeriesLoadResponse(title, url, TvType.NSFW, episodes) {
                 this.posterUrl = poster
                 this.plot = description
                 this.tags = tags
             }
         } else {
-            newMovieLoadResponse(title, url, TvType.Movie, url) {
+            newMovieLoadResponse(title, url, TvType.NSFW, url) {
                 this.posterUrl = poster
                 this.plot = description
                 this.tags = tags
@@ -134,9 +130,21 @@ class Nekopoi : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val doc = app.get(data, headers = ua).document
 
-        doc.select("div.nk-player-frame iframe").forEach { iframe ->
+        doc.select("div.nk-player-frame iframe, iframe[src]").forEach { iframe ->
             val src = iframe.attr("src").ifBlank { return@forEach }
             loadExtractor(src, data, subtitleCallback, callback)
+        }
+
+        doc.select("div.player-embed iframe, div.tab-content iframe").forEach { iframe ->
+            val src = iframe.attr("src").ifBlank { return@forEach }
+            loadExtractor(src, data, subtitleCallback, callback)
+        }
+
+        doc.select("video source[src]").forEach { source ->
+            val src = source.attr("src").ifBlank { return@forEach }
+            callback(newExtractorLink(name, "$name - Video", src) {
+                this.referer = mainUrl
+            })
         }
 
         return true

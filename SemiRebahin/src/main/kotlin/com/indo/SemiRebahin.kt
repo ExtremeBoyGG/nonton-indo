@@ -10,7 +10,7 @@ class SemiRebahin : MainAPI() {
     override val hasMainPage = true
     override var lang = "id"
     override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Movie)
+    override val supportedTypes = setOf(TvType.NSFW)
 
     private val ua = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
@@ -31,7 +31,7 @@ class SemiRebahin : MainAPI() {
                 val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
                 val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
                 val poster = article.selectFirst("div.content-thumbnail img")?.attr("src")?.ifBlank { null }
-                newMovieSearchResponse(title, href, TvType.Movie) {
+                newMovieSearchResponse(title, href, TvType.NSFW) {
                     this.posterUrl = poster
                 }
             }
@@ -43,7 +43,7 @@ class SemiRebahin : MainAPI() {
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
             val poster = article.selectFirst("div.content-thumbnail img")?.attr("src")?.ifBlank { null }
-            newMovieSearchResponse(title, href, TvType.Movie) {
+            newMovieSearchResponse(title, href, TvType.NSFW) {
                 this.posterUrl = poster
             }
         }.let { items ->
@@ -60,7 +60,7 @@ class SemiRebahin : MainAPI() {
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
             val poster = article.selectFirst("div.content-thumbnail img")?.attr("src")?.ifBlank { null }
-            newMovieSearchResponse(title, href, TvType.Movie) {
+            newMovieSearchResponse(title, href, TvType.NSFW) {
                 this.posterUrl = poster
             }
         }
@@ -93,7 +93,7 @@ class SemiRebahin : MainAPI() {
         val rating = doc.selectFirst("meta[itemprop=ratingValue]")?.attr("content")?.toDoubleOrNull()
         val score = Score.from10(rating)
 
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
+        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
             this.posterUrl = poster
             this.plot = description
             this.tags = genres + tags
@@ -104,9 +104,12 @@ class SemiRebahin : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val doc = app.get(data, headers = ua).document
 
-        doc.select("div.gmr-embed-responsive iframe").forEach { iframe ->
+        var found = false
+
+        doc.select("div.gmr-embed-responsive iframe, iframe[src]").forEach { iframe ->
             val src = iframe.attr("src").ifBlank { return@forEach }
             loadExtractor(src, data, subtitleCallback, callback)
+            found = true
         }
 
         doc.select("ul.muvipro-player-tabs li a").forEach { tab ->
@@ -114,11 +117,20 @@ class SemiRebahin : MainAPI() {
             if (!playerParam.contains("player=")) return@forEach
             try {
                 val tabDoc = app.get("$data$playerParam", headers = ua).document
-                tabDoc.select("div.gmr-embed-responsive iframe").forEach { iframe ->
+                tabDoc.select("div.gmr-embed-responsive iframe, iframe[src]").forEach { iframe ->
                     val src = iframe.attr("src").ifBlank { return@forEach }
                     loadExtractor(src, data, subtitleCallback, callback)
+                    found = true
                 }
             } catch (_: Exception) { }
+        }
+
+        doc.select("video source[src]").forEach { source ->
+            val src = source.attr("src").ifBlank { return@forEach }
+            callback(newExtractorLink(name, "$name - Video", src) {
+                this.referer = mainUrl
+            })
+            found = true
         }
 
         return true
