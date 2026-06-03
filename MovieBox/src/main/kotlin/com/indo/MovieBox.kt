@@ -68,16 +68,20 @@ class MovieBox : MainAPI() {
         val subjectType = toInt(s["subjectType"])
         val tvType = toTvType(subjectType)
         val cover = (s["cover"] as? Map<*, *>)?.get("url")?.toString()
+        val imdbRating = s["imdbRatingValue"]?.toString()?.toDoubleOrNull()
 
         return when (tvType) {
             TvType.TvSeries -> newTvSeriesSearchResponse(title, "$mainUrl/moviesDetail/$path", TvType.TvSeries) {
                 this.posterUrl = cover
+                this.score = Score.from10(imdbRating)
             }
             TvType.Anime -> newAnimeSearchResponse(title, "$mainUrl/moviesDetail/$path", TvType.Anime) {
                 this.posterUrl = cover
+                this.score = Score.from10(imdbRating)
             }
             else -> newMovieSearchResponse(title, "$mainUrl/moviesDetail/$path", TvType.Movie) {
                 this.posterUrl = cover
+                this.score = Score.from10(imdbRating)
             }
         }
     }
@@ -116,6 +120,7 @@ class MovieBox : MainAPI() {
         val title = subject["title"]?.toString() ?: throw ErrorLoadingException("Title not found")
         val subjectId = subject["subjectId"]?.toString().orEmpty()
         val tvType = toTvType(toInt(subject["subjectType"]))
+        val imdbRating = subject["imdbRatingValue"]?.toString()?.toDoubleOrNull()
         val plot = subject["description"]?.toString()
         val poster = (subject["cover"] as? Map<*, *>)?.get("url")?.toString()
         val tags = subject["genre"]?.toString()?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
@@ -154,6 +159,7 @@ class MovieBox : MainAPI() {
                 this.plot = plot
                 this.tags = tags
                 this.year = year
+                this.score = Score.from10(imdbRating)
             }
         }
 
@@ -162,6 +168,7 @@ class MovieBox : MainAPI() {
             this.plot = plot
             this.tags = tags
             this.year = year
+            this.score = Score.from10(imdbRating)
         }
     }
 
