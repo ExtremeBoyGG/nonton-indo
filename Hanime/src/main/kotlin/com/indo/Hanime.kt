@@ -108,13 +108,14 @@ class Hanime : MainAPI() {
 
         val manifestHeaders = mapOf(
             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-            "Referer" to "https://player.hanime.tv/",
-            "Origin" to "https://player.hanime.tv",
+            "Referer" to "$mainUrl/",
+            "Origin" to "$mainUrl",
             "Accept" to "application/json",
             "x-signature-version" to "web2",
             "x-signature" to "",
             "x-time" to "0",
-            "x-session-token" to ""
+            "x-session-token" to "",
+            "x-csrf-token" to ""
         )
 
         val manifestJson = try {
@@ -122,20 +123,20 @@ class Hanime : MainAPI() {
         } catch (_: Exception) { null }
 
         val hlsUrl = if (!manifestJson.isNullOrBlank()) {
-            val manifestRoot = tryParseJson<Map<String, Any?>>(manifestJson) ?: return false
-            manifestRoot["url"]?.toString()
-                ?: (manifestRoot["videos_manifest"] as? Map<*, *>)
-                    ?.let { m -> (m["servers"] as? List<Map<*, *>>)?.firstOrNull()
-                        ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
-                            ?.let { st -> st["url"]?.toString() } } }
-                ?: return false
+            val manifestRoot = tryParseJson<Map<String, Any?>>(manifestJson)
+            if (manifestRoot != null) {
+                manifestRoot["url"]?.toString()
+                    ?: (manifestRoot["videos_manifest"] as? Map<*, *>)
+                        ?.let { m -> (m["servers"] as? List<Map<*, *>>)?.firstOrNull()
+                            ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
+                                ?.let { st -> st["url"]?.toString() } } }
+            } else null
         } else {
             (detailRoot["videos_manifest"] as? Map<*, *>)
                 ?.let { m -> (m["servers"] as? List<Map<*, *>>)?.firstOrNull()
                     ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
                         ?.let { st -> st["url"]?.toString() } } }
-                ?: return false
-        }
+        } ?: return false
 
         if (hlsUrl.isBlank()) return false
 
