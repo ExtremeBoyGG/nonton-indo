@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.nicehttp.JsonAsString
 
 class Hanime : MainAPI() {
     override var mainUrl = "https://hanime.tv"
@@ -20,6 +21,12 @@ class Hanime : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
         "Referer" to "$mainUrl/",
         "Origin" to "$mainUrl/"
+    )
+
+    private val playerHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+        "Referer" to "https://player.hanime.tv/",
+        "Origin" to "https://player.hanime.tv/"
     )
 
     override val mainPage = mainPageOf(
@@ -90,31 +97,37 @@ class Hanime : MainAPI() {
     ): Boolean {
         val slug = data.substringAfterLast("/")
 
-        val json = app.get("$apiBase/video?id=$slug", headers = headers).text ?: return false
-        val root = tryParseJson<Map<String, Any?>>(json) ?: return false
+        val detailJson = app.get("$apiBase/video?id=$slug", headers = headers).text ?: return false
+        val detailRoot = tryParseJson<Map<String, Any?>>(detailJson) ?: return false
+        val video = detailRoot["hentai_video"] as? Map<*, *> ?: return false
+        val hvId = video["id"]?.toString() ?: return false
 
-        val manifest = root["videos_manifest"] as? Map<*, *> ?: return false
-        val servers = manifest["servers"] as? List<Map<*, *>> ?: return false
+        app.post("$apiBase/hentai_videos/$slug/play", headers = headers, json = JsonAsString("{}"))
 
-        servers.forEach { server ->
-            val streams = server["streams"] as? List<Map<*, *>> ?: return@forEach
-            streams.forEach { stream ->
-                val videoUrl = stream["url"]?.toString() ?: return@forEach
-                if (videoUrl.isBlank()) return@forEach
-                val links = M3u8Helper.generateM3u8(
-                    source = name,
-                    streamUrl = videoUrl,
-                    referer = "$mainUrl/",
-                    headers = headers
-                )
-                if (links.isEmpty()) {
-                    callback(newExtractorLink(name, "$name - HLS", videoUrl) {
-                        this.referer = "$mainUrl/"
-                    })
-                } else {
-                    links.forEach { callback(it) }
-                }
-            }
+        val manifestJson = app.get("$apiBase/guest/videos/$hvId/manifest", headers = playerHeaders).text ?: return false
+        val manifestRoot = tryParseJson<Map<String, Any?>>(manifestJson) ?: return false
+
+        val hlsUrl = manifestRoot["url"]?.toString()
+            ?: (manifestRoot["videos_manifest"] as? Map<*, *>)
+                ?.let { m -> (m["servers"] as? List<Map<*, *>>)?.firstOrNull()
+                    ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
+                        ?.let { st -> st["url"]?.toString() } } }
+            ?: return false
+
+        if (hlsUrl.isBlank()) return false
+
+        val links = M3u8Helper.generateM3u8(
+            source = name,
+            streamUrl = hlsUrl,
+            referer = "https://player.hanime.tv/",
+            headers = playerHeaders
+        )
+        if (links.isEmpty()) {
+            callback(newExtractorLink(name, "$name - HLS", hlsUrl) {
+                this.referer = "https://player.hanime.tv/"
+            })
+        } else {
+            links.forEach { callback(it) }
         }
 
         return true
