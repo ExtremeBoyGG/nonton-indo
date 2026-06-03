@@ -18,47 +18,9 @@ class Rebahin : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (page > 1) {
-            val apiPage = page - 1
-            val sections = listOfNotNull(
-                getApiSection("Movies", apiPage, "api/movies"),
-                getApiSection("TV Series", apiPage, "api/tv"),
-            )
-            return newHomePageResponse(sections)
-        }
-        val doc = app.get("$mainUrl/").document
         val sections = mutableListOf<HomePageList>()
-
-        doc.select("section").forEach { section ->
-            val titleEl = section.selectFirst("h2") ?: return@forEach
-            val name = titleEl.text().trim()
-            if (name.isBlank()) return@forEach
-
-            val items = section.select("a[href^=/movies/], a[href^=/tv/]").mapNotNull { a ->
-                val href = a.attr("href").ifBlank { return@mapNotNull null }
-                val img = a.selectFirst("img") ?: return@mapNotNull null
-                val title = img.attr("alt").ifBlank { return@mapNotNull null }
-                var poster = img.attr("src").ifBlank { null }
-                if (poster != null && poster.startsWith("/_next/image")) {
-                    poster = Regex("url=([^&]+)").find(poster)?.groupValues?.getOrNull(1)?.let {
-                        java.net.URLDecoder.decode(it, "UTF-8")
-                    }
-                }
-                val isSeries = href.startsWith("/tv/")
-                val ratingEl = a.selectFirst("div.absolute.top-2.right-2")
-                val voteAvg = ratingEl?.text()?.trim()?.toDoubleOrNull()
-                if (isSeries)
-                    newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) {
-                        this.posterUrl = poster; this.score = Score.from10(voteAvg)
-                    }
-                else
-                    newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
-                        this.posterUrl = poster; this.score = Score.from10(voteAvg)
-                    }
-            }
-            if (items.isNotEmpty()) sections.add(HomePageList(name, items))
-        }
-
+        getApiSection("Movies", page, "api/movies")?.let { sections.add(it) }
+        getApiSection("TV Series", page, "api/tv")?.let { sections.add(it) }
         return newHomePageResponse(sections)
     }
 
