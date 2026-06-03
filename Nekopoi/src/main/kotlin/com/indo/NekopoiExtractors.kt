@@ -44,36 +44,15 @@ class Streampoi : ExtractorApi() {
     ) {
         val html = app.get(url).text
 
-        val evalMatch = Regex(
-            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)""",
+        val packed = Regex(
+            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?\}\s*\(\s*'([^']+)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([^']+)'\s*\.split\s*\(\s*'\|\s*'\s*\)\s*\)""",
             RegexOption.IGNORE_CASE
         ).find(html) ?: return
-        val evalEnd = html.indexOf("))", evalMatch.range.last)
-        if (evalEnd == -1) return
-        val evalBody = html.substring(evalMatch.range.first, evalEnd + 2)
 
-        val unpacked = unpackDeanEdwards(evalBody)
-        val fileUrl = Regex("""["']file["']\s*:\s*["']([^"']+)["']""").find(unpacked)?.groupValues?.getOrNull(1) ?: return
-
-        callback.invoke(
-            newExtractorLink(name, name, fileUrl) {
-                this.referer = referer ?: url
-                this.quality = Qualities.Unknown.value
-            }
-        )
-    }
-
-    private fun unpackDeanEdwards(evalCode: String): String {
-        val funcRegex = Regex(
-            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?}\s*\)\s*\(\s*['"]([^'"]*)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['"]([^'"]*)['"]\s*\.split\s*\(\s*['"]\|\s*['"]\s*\)\s*\)""",
-            RegexOption.IGNORE_CASE
-        )
-        val match = funcRegex.find(evalCode) ?: return evalCode
-
-        val encoded = match.groupValues[1]
-        val radix = match.groupValues[2].toIntOrNull() ?: return evalCode
-        val count = match.groupValues[3].toIntOrNull() ?: return evalCode
-        val dictStr = match.groupValues[4]
+        val encoded = packed.groupValues[1]
+        val radix = packed.groupValues[2].toIntOrNull() ?: return
+        val count = packed.groupValues[3].toIntOrNull() ?: return
+        val dictStr = packed.groupValues[4]
         val dictionary = dictStr.split("|")
 
         var result = encoded
@@ -84,6 +63,15 @@ class Streampoi : ExtractorApi() {
                 result = result.replace(Regex("\\b" + Regex.escape(word) + "\\b"), replacement)
             }
         }
-        return result
+
+        val fileUrl = Regex("""['"]file['"]\s*:\s*['"]([^'"]+)['"]""").find(result)?.groupValues?.getOrNull(1) ?: return
+
+        callback.invoke(
+            newExtractorLink(name, name, fileUrl) {
+                this.referer = referer ?: url
+                this.quality = Qualities.Unknown.value
+            }
+        )
     }
+
 }
