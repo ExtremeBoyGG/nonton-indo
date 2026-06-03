@@ -1,0 +1,89 @@
+package com.indo
+
+import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.utils.ExtractorApi
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.Qualities
+
+class Playmogo : ExtractorApi() {
+    override val name = "Playmogo"
+    override val mainUrl = "https://playmogo.com"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val doc = app.get(url).text
+        val passMd5 = Regex("/pass_md5/[^/]+/[^/\\s\"')]+").find(doc)?.value ?: return
+        val videoUrl = app.get("$mainUrl$passMd5").text.trim()
+        if (videoUrl.isBlank()) return
+        callback.invoke(
+            newExtractorLink(name, name, videoUrl) {
+                this.referer = referer ?: url
+                this.quality = Qualities.Unknown.value
+            }
+        )
+    }
+}
+
+class Streampoi : ExtractorApi() {
+    override val name = "Streampoi"
+    override val mainUrl = "https://streampoi.com"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val html = app.get(url).text
+
+        val evalMatch = Regex(
+            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)""",
+            RegexOption.IGNORE_CASE
+        ).find(html) ?: return
+        val evalEnd = html.indexOf("))", evalMatch.range.last)
+        if (evalEnd == -1) return
+        val evalBody = html.substring(evalMatch.range.first, evalEnd + 2)
+
+        val unpacked = unpackDeanEdwards(evalBody)
+        val fileUrl = Regex("""["']file["']\s*:\s*["']([^"']+)["']""").find(unpacked)?.groupValues?.getOrNull(1) ?: return
+
+        callback.invoke(
+            newExtractorLink(name, name, fileUrl) {
+                this.referer = referer ?: url
+                this.quality = Qualities.Unknown.value
+            }
+        )
+    }
+
+    private fun unpackDeanEdwards(evalCode: String): String {
+        val funcRegex = Regex(
+            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?}\s*\)\s*\(\s*['"]([^'"]*)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['"]([^'"]*)['"]\s*\.split\s*\(\s*['"]\|\s*['"]\s*\)\s*\)""",
+            RegexOption.IGNORE_CASE
+        )
+        val match = funcRegex.find(evalCode) ?: return evalCode
+
+        val encoded = match.groupValues[1]
+        val radix = match.groupValues[2].toIntOrNull() ?: return evalCode
+        val count = match.groupValues[3].toIntOrNull() ?: return evalCode
+        val dictStr = match.groupValues[4]
+        val dictionary = dictStr.split("|")
+
+        var result = encoded
+        for (i in (count - 1) downTo 0) {
+            val replacement = dictionary.getOrNull(i)
+            if (!replacement.isNullOrEmpty()) {
+                val word = i.toString(radix)
+                result = result.replace(Regex("\\b" + Regex.escape(word) + "\\b"), replacement)
+            }
+        }
+        return result
+    }
+}
