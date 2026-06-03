@@ -124,9 +124,8 @@ class Hanime : MainAPI() {
         val v = video ?: return null
         val name = v["name"]?.toString()?.ifBlank { null } ?: return null
         val slug = v["slug"]?.toString()?.ifBlank { null } ?: return null
-        val cover = v["cover_url"]?.toString()
         return newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
-            this.posterUrl = cover
+            this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
         }
     }
 }
