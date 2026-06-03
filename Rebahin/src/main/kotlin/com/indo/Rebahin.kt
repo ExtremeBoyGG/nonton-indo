@@ -18,7 +18,14 @@ class Rebahin : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (page > 1) return newHomePageResponse(request.name, emptyList())
+        if (page > 1) {
+            val apiPage = page - 1
+            val sections = listOfNotNull(
+                getApiSection("Movies", apiPage, "api/movies"),
+                getApiSection("TV Series", apiPage, "api/tv"),
+            )
+            return newHomePageResponse(sections)
+        }
         val doc = app.get("$mainUrl/").document
         val sections = mutableListOf<HomePageList>()
 
@@ -53,6 +60,33 @@ class Rebahin : MainAPI() {
         }
 
         return newHomePageResponse(sections)
+    }
+
+    private suspend fun getApiSection(name: String, page: Int, apiPath: String): HomePageList? {
+        val resp = app.get("$mainUrl/$apiPath?page=$page&limit=24")
+        val text = resp.text ?: return null
+        val data = try { JSONObject(text).optJSONArray("data") } catch (e: Exception) { return null }
+        if (data == null) return null
+        val items = (0 until data.length()).mapNotNull { i ->
+            val item = data.optJSONObject(i) ?: return@mapNotNull null
+            val id = item.optString("id", "")
+            val title = item.optString("title", "")
+            if (id.isBlank() || title.isBlank()) return@mapNotNull null
+            val posterPath = item.optString("posterPath", "")
+            val poster = if (posterPath.isNotBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else null
+            val type = item.optString("type", "movie")
+            val voteAvg = if (item.has("voteAverage")) item.optDouble("voteAverage", -1.0).let { if (it < 0) null else it } else null
+            val href = if (type == "tv") "/tv/$id" else "/movies/$id"
+            if (type == "tv")
+                newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) {
+                    this.posterUrl = poster; this.score = Score.from10(voteAvg)
+                }
+            else
+                newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
+                    this.posterUrl = poster; this.score = Score.from10(voteAvg)
+                }
+        }
+        return if (items.isEmpty()) null else HomePageList(name, items)
     }
 
     private fun findMatchingBraceAny(s: String, start: Int, close: Char): Int {
