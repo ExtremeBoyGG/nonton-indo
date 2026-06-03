@@ -1,10 +1,11 @@
 package com.indo
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import java.util.Base64
 
 class Oploverz : MainAPI() {
@@ -111,11 +112,11 @@ class Oploverz : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data).document
 
-        // Iframe dari player-embed dan mirror select (base64)
+        // Iframe dari player-embed
         document.select("div#pembed iframe, div.player-embed iframe, div.video-content iframe")
             .forEach { iframe ->
                 val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-                if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+                if (src.startsWith("http")) handleUrl(src, data, subtitleCallback, callback)
             }
 
         // Mirror option values (base64 encoded iframes)
@@ -123,7 +124,7 @@ class Oploverz : MainAPI() {
             val encoded = option.attr("value").ifBlank { null } ?: return@forEach
             val decoded = try { String(Base64.getDecoder().decode(encoded)) } catch (e: Exception) { null } ?: return@forEach
             val src = Regex("src\\s*=\\s*\"([^\"]+)\"").find(decoded)?.groupValues?.getOrNull(1) ?: return@forEach
-            if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+            if (src.startsWith("http")) handleUrl(src, data, subtitleCallback, callback)
         }
 
         // Gofile download link — pakai built-in Gofile extractor (API v2)
@@ -134,4 +135,51 @@ class Oploverz : MainAPI() {
 
         return true
     }
+
+    private suspend fun handleUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
+        if (url.contains("blogger.com")) {
+            handleBloggerUrl(url, referer, subtitleCallback, callback)
+        } else {
+            loadExtractor(url, referer, subtitleCallback, callback)
+        }
+    }
+
+    private suspend fun handleBloggerUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
+        // Try built-in extractor first (handles old-style pages with VIDEO_CONFIG)
+        val extracted = loadExtractor(url, referer, subtitleCallback, callback)
+        if (!extracted.isNullOrEmpty()) return
+
+        // Manual parsing of the Blogger page (fallback)
+        try {
+            val doc = app.get(url).document
+            doc.select("script").forEach { script ->
+                val text = script.data()
+                val streamsStart = text.indexOf("\"streams\":[")
+                if (streamsStart >= 0) {
+                    val from = streamsStart + "\"streams\":[".length
+                    val end = text.indexOf(']', from)
+                    if (end > from) {
+                        val streamsJson = "[" + text.substring(from, end) + "]"
+                        tryParseJson<List<ResponseSource>>(streamsJson)?.forEach { source ->
+                            callback(
+                                newExtractorLink(name, name, source.play_url) {
+                                    this.referer = "https://www.youtube.com/"
+                                    this.quality = when (source.format_id) {
+                                        18 -> 360
+                                        22 -> 720
+                                        else -> Qualities.Unknown.value
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+    }
+
+    private data class ResponseSource(
+        @JsonProperty("play_url") val play_url: String,
+        @JsonProperty("format_id") val format_id: Int
+    )
 }
