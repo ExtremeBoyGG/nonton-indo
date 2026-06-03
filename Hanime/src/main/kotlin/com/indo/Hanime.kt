@@ -3,7 +3,7 @@ package com.indo
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class Hanime : MainAPI() {
@@ -100,19 +100,19 @@ class Hanime : MainAPI() {
             val streams = server["streams"] as? List<Map<*, *>> ?: return@forEach
             streams.forEach { stream ->
                 val videoUrl = stream["url"]?.toString() ?: return@forEach
-                val height = stream["height"]?.toString()?.toIntOrNull()
-                val quality = when {
-                    height != null && height >= 2160 -> Qualities.P2160.value
-                    height != null && height >= 1080 -> Qualities.P1080.value
-                    height != null && height >= 720 -> Qualities.P720.value
-                    height != null && height >= 480 -> Qualities.P480.value
-                    height != null && height >= 360 -> Qualities.P360.value
-                    else -> Qualities.Unknown.value
+                if (videoUrl.isBlank()) return@forEach
+                val links = M3u8Helper.generateM3u8(
+                    source = name,
+                    masterUrl = videoUrl,
+                    headers = headers
+                )
+                if (links.isEmpty()) {
+                    callback(newExtractorLink(name, "$name - HLS", videoUrl) {
+                        this.referer = "$mainUrl/"
+                    })
+                } else {
+                    links.forEach { callback(it) }
                 }
-                callback(newExtractorLink(name, "$name - ${height ?: "HD"}p", videoUrl) {
-                    this.referer = "$mainUrl/"
-                    this.quality = quality
-                })
             }
         }
 
