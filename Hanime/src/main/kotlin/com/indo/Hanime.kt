@@ -59,6 +59,7 @@ class Hanime : MainAPI() {
             val title = a.attr("alt").ifBlank { return@mapNotNull null }
             newMovieSearchResponse(title, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
                 this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
+                this.posterHeaders = mapOf("Referer" to "$mainUrl/")
             }
         }.distinctBy { it.url }
     }
@@ -83,6 +84,7 @@ class Hanime : MainAPI() {
 
         return newMovieLoadResponse(title, url, TvType.NSFW, url) {
             this.posterUrl = poster
+            this.posterHeaders = mapOf("Referer" to "$mainUrl/")
             this.plot = plot
             this.tags = tags
             this.year = year
@@ -139,6 +141,7 @@ class Hanime : MainAPI() {
         val slug = v["slug"]?.toString()?.ifBlank { null } ?: return null
         return newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
             this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
+            this.posterHeaders = mapOf("Referer" to "$mainUrl/")
         }
     }
 }
