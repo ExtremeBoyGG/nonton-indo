@@ -258,8 +258,8 @@ class Idlix : MainAPI() {
             return false
         }
 
-        val streamUrl: String?
-        val subtitles: List<Pair<String, String>>
+        var streamUrl: String? = null
+        var subtitles: List<Pair<String, String>> = emptyList()
         try {
             val playInfoResp = app.get("$mainUrl/api/watch/play-info/$contentType/$contentId")
             val playInfo = JSONObject(playInfoResp.text ?: return false)
@@ -292,10 +292,7 @@ class Idlix : MainAPI() {
                             if (lang.isNotBlank() && path.isNotBlank()) Pair(lang, path) else null
                         }
                     } else emptyList()
-                } catch (e: Exception) {
-                    streamUrl = null
-                    subtitles = emptyList()
-                }
+                } catch (_: Exception) {}
                 if (streamUrl != null) {
                     subtitles.forEach { (lang, path) ->
                         subtitleCallback(SubtitleFile(lang, path))
