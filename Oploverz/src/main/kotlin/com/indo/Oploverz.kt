@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import java.util.Base64
 
 class Oploverz : MainAPI() {
     override var mainUrl = "https://oploverz.ch"
@@ -25,24 +26,34 @@ class Oploverz : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "$mainUrl/series/?status=&type=&order=update&page=" to "Update Terbaru"
+        "$mainUrl/page/" to "Update Terbaru"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data + page).document
-        val home = document.select("div.bsx, article.bs").mapNotNull { el ->
+        val url = if (page <= 1) "$mainUrl/" else "${request.data}$page/"
+        val document = app.get(url).document
+        val home = document.select("div.bsx").mapNotNull { el ->
             val a = el.selectFirst("a[href]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = el.selectFirst("div.tt h4, h4, .tt")?.text()?.trim()
+            val title = el.selectFirst("div.tt")?.ownText()?.trim()
+                ?: el.selectFirst("h2")?.text()?.trim()
                 ?: a.attr("title").ifBlank { null } ?: return@mapNotNull null
             val poster = el.selectFirst("img")?.attr("src")?.ifBlank { null }
-            val epNum = el.selectFirst("div.limit div.ep")?.text()?.trim()?.toIntOrNull()
-            newAnimeSearchResponse(title, href, TvType.Anime) {
+            val epText = el.selectFirst("span.epx")?.text()?.trim() ?: ""
+            val epNum = Regex("(\\d+)").find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            val animeUrl = if (epNum != null) episodeUrlToAnimeUrl(href) else href
+            newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
                 this.posterUrl = poster
                 addSub(epNum)
             }
         }.distinctBy { it.url }
         return newHomePageResponse(request.name, home)
+    }
+
+    private fun episodeUrlToAnimeUrl(episodeUrl: String): String {
+        val slug = episodeUrl.trimEnd('/').substringAfterLast("/")
+        val animeSlug = slug.replace(Regex("-episode-\\d+.*", RegexOption.IGNORE_CASE), "")
+        return "$mainUrl/series/$animeSlug/"
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -100,12 +111,20 @@ class Oploverz : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data).document
 
-        // Iframe Blogger langsung ada di static HTML di div#pembed
+        // Iframe dari player-embed dan mirror select (base64)
         document.select("div#pembed iframe, div.player-embed iframe, div.video-content iframe")
             .forEach { iframe ->
                 val src = iframe.attr("src").ifBlank { null } ?: return@forEach
                 if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
+
+        // Mirror option values (base64 encoded iframes)
+        document.select("select.mirror option").forEach { option ->
+            val encoded = option.attr("value").ifBlank { null } ?: return@forEach
+            val decoded = try { String(Base64.getDecoder().decode(encoded)) } catch (e: Exception) { null } ?: return@forEach
+            val src = Regex("src\\s*=\\s*\"([^\"]+)\"").find(decoded)?.groupValues?.getOrNull(1) ?: return@forEach
+            if (src.startsWith("http")) loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+        }
 
         // Gofile download link — pakai built-in Gofile extractor (API v2)
         document.select("a[href*=gofile.io]").forEach { a ->
