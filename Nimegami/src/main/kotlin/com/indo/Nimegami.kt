@@ -89,10 +89,10 @@ class Nimegami : MainAPI() {
             val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
             val ratingText = article.selectFirst("div.rating")?.text()
                 ?.replace(Regex("[^0-9.]"), "") ?: ""
-            val rating = ratingText.toFloatOrNull() ?: -1f
+            val rating = ratingText.toFloatOrNull()
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = getImg(article)
-                if (rating >= 0f) this.rating = rating
+                this.score = Score.from10(rating?.toDouble())
             }
         }.distinctBy { it.url }
         return newHomePageResponse(request.name, home)
