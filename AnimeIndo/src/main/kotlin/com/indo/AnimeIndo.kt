@@ -4,6 +4,8 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
@@ -198,50 +200,18 @@ class AnimeIndo : MainAPI() {
                     }
                 } catch (_: Exception) {}
             } else if (fullUrl.contains("xtwap.top")) {
-                // CEPAT server — parse JWPlayer source dari JavaScript
+                // CEPAT server — parse JWPlayer source dan extract HLS qualities
                 try {
                     val html = app.get(fullUrl).text
                     val fileMatch = Regex("\"file\"\\s*:\\s*\"([^\"]+)\"").find(html)
                     val filePath = fileMatch?.groupValues?.getOrNull(1)
                     if (!filePath.isNullOrBlank()) {
-                        val baseUrl = "https://xtwap.top"
-                        val masterUrl = if (filePath.startsWith("/")) "$baseUrl$filePath" else filePath
-
-                        try {
-                            val masterPlaylist = app.get(masterUrl).text
-                            val variantRegex = Regex("RESOLUTION=(\\d+)x(\\d+)\\s*\\n\\s*(\\S+)", setOf(RegexOption.IGNORE_CASE))
-                            val variants = variantRegex.findAll(masterPlaylist).mapNotNull { match ->
-                                val height = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
-                                val path = match.groupValues[3].trim()
-                                val quality = when {
-                                    height >= 1080 -> Qualities.P1080.value
-                                    height >= 720 -> Qualities.P720.value
-                                    height >= 480 -> Qualities.P480.value
-                                    height >= 360 -> Qualities.P360.value
-                                    else -> Qualities.Unknown.value
-                                }
-                                val variantUrl = if (path.startsWith("http")) path
-                                else if (path.startsWith("/")) "$baseUrl$path"
-                                else "$baseUrl/$path"
-                                Pair(variantUrl, quality)
-                            }.toList()
-
-                            if (variants.isNotEmpty()) {
-                                variants.forEach { (url, quality) ->
-                                    callback(newExtractorLink("AnimeIndo", "CEPAT", url) {
-                                        this.quality = quality
-                                        this.referer = masterUrl
-                                    })
-                                }
-                            } else {
-                                callback(newExtractorLink("AnimeIndo", "CEPAT", masterUrl) {
-                                    this.quality = Qualities.P1080.value
-                                    this.referer = fullUrl
-                                })
-                            }
-                        } catch (_: Exception) {
-                            callback(newExtractorLink("AnimeIndo", "CEPAT", masterUrl) {
-                                this.quality = Qualities.P1080.value
+                        val masterUrl = if (filePath.startsWith("/")) "https://xtwap.top$filePath" else filePath
+                        val links = M3u8Helper.generateM3u8("AnimeIndo", masterUrl, fullUrl)
+                        if (links.isNotEmpty()) {
+                            links.forEach { callback(it) }
+                        } else {
+                            callback(newExtractorLink("AnimeIndo", "CEPAT", masterUrl, type = ExtractorLinkType.M3U8) {
                                 this.referer = fullUrl
                             })
                         }
