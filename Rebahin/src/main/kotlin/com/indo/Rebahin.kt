@@ -85,13 +85,14 @@ class Rebahin : MainAPI() {
             val title = Regex("\"title\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
             val posterPath = Regex("\"posterPath\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
             val type = Regex("\"type\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
+            val voteAvg = Regex("\"voteAverage\":([0-9.]+)").find(obj)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
             if (id != null && title != null) {
                 val poster = if (posterPath != null) "https://image.tmdb.org/t/p/w500$posterPath" else null
                 val href = if (type == "tv") "/tv/$id" else "/movies/$id"
                 val sr = if (type == "tv")
-                    newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster }
+                    newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster; this.score = Score.from10(voteAvg) }
                 else
-                    newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster }
+                    newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster; this.score = Score.from10(voteAvg) }
                 items.add(sr)
             }
             objPos = objEnd + 1
@@ -148,11 +149,12 @@ class Rebahin : MainAPI() {
             val posterPath = item.optString("posterPath", "")
             val poster = if (posterPath.isNotBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else null
             val type = item.optString("type", "movie")
+            val voteAvg = if (item.has("voteAverage")) item.optDouble("voteAverage", -1.0).let { if (it < 0) null else it } else null
             val href = if (type == "tv") "/tv/$id" else "/movies/$id"
             if (type == "tv") {
-                newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster }
+                newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster; this.score = Score.from10(voteAvg) }
             } else {
-                newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster }
+                newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster; this.score = Score.from10(voteAvg) }
             }
         }
     }
@@ -173,6 +175,9 @@ class Rebahin : MainAPI() {
         val tags = Regex("\"genres\":\\[([^\\]]+)\\]").find(html)?.let { m ->
             Regex("\"name\":\"([^\"]+)\"").findAll(m.value).map { it.groupValues[1] }.toList()
         } ?: doc.select("a[href*=genre], a[href*=category]").map { it.text() }.filter { it.isNotBlank() }
+
+        val voteAvg = Regex("\"voteAverage\":([0-9.]+)").find(html)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
+        val score = Score.from10(voteAvg)
 
         val isSeries = url.contains("/tv/")
         return if (isSeries) {
@@ -207,11 +212,11 @@ class Rebahin : MainAPI() {
                 }
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeUrls) {
-                posterUrl = poster; plot = description; this.tags = tags; this.year = year
+                posterUrl = poster; plot = description; this.tags = tags; this.year = year; this.score = score
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
-                posterUrl = poster; plot = description; this.tags = tags; this.year = year
+                posterUrl = poster; plot = description; this.tags = tags; this.year = year; this.score = score
             }
         }
     }
