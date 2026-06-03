@@ -170,8 +170,11 @@ class Nimegami : MainAPI() {
                     val urls = entry.url ?: return@forEach
                     urls.forEachIndexed { idx, streamUrl ->
                         if (streamUrl.isNotBlank()) {
+                            val separator = if (streamUrl.contains("?")) "&" else "?"
+                            val fixedUrl = if (streamUrl.contains("dlgan.halahgan.com") && !streamUrl.contains("direct=1"))
+                                "$streamUrl${separator}direct=1" else streamUrl
                             val serverLabel = if (urls.size > 1) "Server ${idx + 1}" else "Server"
-                            callback(newExtractorLink("Nimegami", serverLabel, streamUrl) {
+                            callback(newExtractorLink("Nimegami", serverLabel, fixedUrl) {
                                 this.quality = quality
                                 this.referer = pageUrl
                             })
@@ -199,8 +202,11 @@ class Nimegami : MainAPI() {
                     val urls = entry.url ?: return@forEach
                     urls.forEachIndexed { idx, streamUrl ->
                         if (streamUrl.isNotBlank()) {
+                            val separator = if (streamUrl.contains("?")) "&" else "?"
+                            val fixedUrl = if (streamUrl.contains("dlgan.halahgan.com") && !streamUrl.contains("direct=1"))
+                                "$streamUrl${separator}direct=1" else streamUrl
                             val serverLabel = if (urls.size > 1) "Server ${idx + 1}" else "Server"
-                            callback(newExtractorLink("Nimegami", serverLabel, streamUrl) {
+                            callback(newExtractorLink("Nimegami", serverLabel, fixedUrl) {
                                 this.quality = quality
                                 this.referer = pageUrl
                             })
