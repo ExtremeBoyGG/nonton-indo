@@ -110,5 +110,47 @@
         "internalName": "Idlix",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Idlix.cs3",
         "name": "Idlix"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://nekopoi.care&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Movie", "TvSeries"],
+        "version": 1,
+        "internalName": "Nekopoi",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Nekopoi.cs3",
+        "name": "Nekopoi"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=http://167.71.237.49&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Movie"],
+        "version": 1,
+        "internalName": "SemiRebahin",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/SemiRebahin.cs3",
+        "name": "SemiRebahin"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://hanime.tv&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "en",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Movie"],
+        "version": 1,
+        "internalName": "Hanime",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Hanime.cs3",
+        "name": "Hanime"
     }
 ]
