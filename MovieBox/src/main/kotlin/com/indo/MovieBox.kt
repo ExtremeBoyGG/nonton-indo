@@ -171,10 +171,6 @@ class MovieBox : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Visit movie page first to establish session, then call play API
-        val dataPath = data.substringAfter(mainUrl).substringBefore("?")
-        tokenGet(dataPath)
-
         val detailPath = detailPathFromUrl(data)
         val sid = Regex("[?&](sid|id)=([^&]+)").find(data)?.groupValues?.getOrNull(2)
         val se = Regex("[?&]se=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
@@ -190,7 +186,9 @@ class MovieBox : MainAPI() {
 
         if (subjectId.isBlank()) return false
 
-        val playRaw = tokenGet("/wefeed-h5api-bff/subject/play?subjectId=$subjectId&se=$se&ep=$ep&detailPath=$detailPath")
+        val referer = "$mainUrl/movies/$detailPath"
+        val playHeaders = baseHeaders + ("Referer" to referer)
+        val playRaw = app.get("$mainUrl/wefeed-h5api-bff/subject/play?subjectId=$subjectId&se=$se&ep=$ep&detailPath=$detailPath", headers = playHeaders).text
         val playRoot = tryParseJson<Map<String, Any?>>(playRaw)
         val playData = playRoot?.get("data") as? Map<*, *> ?: return false
         val hasResource = playData["hasResource"] as? Boolean ?: false
