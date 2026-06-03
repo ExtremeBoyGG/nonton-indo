@@ -19,13 +19,26 @@ class Playmogo : ExtractorApi() {
         callback: (ExtractorLink) -> Unit
     ) {
         val doc = app.get(url).text
+
         val passMd5 = Regex("/pass_md5/[^/]+/[^/\\s\"')]+").find(doc)?.value ?: return
-        val videoUrl = app.get("$mainUrl$passMd5").text.trim()
+        val videoUrl = app.get("$mainUrl$passMd5", referer = url).text.trim()
         if (videoUrl.isBlank()) return
+
+        val quality = when {
+            Regex("""\b(?:2160|4k)\b""", RegexOption.IGNORE_CASE).containsMatchIn(videoUrl) -> Qualities.P2160.value
+            Regex("""\b(?:1080|hd)\b""", RegexOption.IGNORE_CASE).containsMatchIn(videoUrl) -> Qualities.P1080.value
+            Regex("""\b720\b""", RegexOption.IGNORE_CASE).containsMatchIn(videoUrl) -> Qualities.P720.value
+            Regex("""\b480\b""", RegexOption.IGNORE_CASE).containsMatchIn(videoUrl) -> Qualities.P480.value
+            Regex("""\b360\b""", RegexOption.IGNORE_CASE).containsMatchIn(videoUrl) -> Qualities.P360.value
+            else -> Qualities.Unknown.value
+        }
+
         callback.invoke(
             newExtractorLink(name, name, videoUrl) {
                 this.referer = referer ?: url
-                this.quality = Qualities.Unknown.value
+                this.quality = quality
+                this.addHeader("Referer", mainUrl)
+                this.addHeader("Origin", mainUrl)
             }
         )
     }
@@ -66,10 +79,21 @@ class Streampoi : ExtractorApi() {
 
         val fileUrl = Regex("""['"]file['"]\s*:\s*['"]([^'"]+)['"]""").find(result)?.groupValues?.getOrNull(1) ?: return
 
+        val quality = when {
+            Regex("""\b(?:2160|4k)\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P2160.value
+            Regex("""\b(?:1080|hd)\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P1080.value
+            Regex("""\b720\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P720.value
+            Regex("""\b480\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P480.value
+            Regex("""\b360\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P360.value
+            else -> Qualities.Unknown.value
+        }
+
         callback.invoke(
             newExtractorLink(name, name, fileUrl) {
                 this.referer = referer ?: url
-                this.quality = Qualities.Unknown.value
+                this.quality = quality
+                this.addHeader("Referer", mainUrl)
+                this.addHeader("Origin", mainUrl)
             }
         )
     }
