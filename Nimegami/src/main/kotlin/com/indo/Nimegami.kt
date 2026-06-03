@@ -24,7 +24,8 @@ class Nimegami : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/page/" to "Anime Terbaru"
+        "$mainUrl/page/" to "Anime Terbaru",
+        "$mainUrl" to "Rekomendasi"
     )
 
     data class NimegamiStream(
@@ -63,7 +64,22 @@ class Nimegami : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = app.get(request.data + page, headers = ua).document
+        val doc = app.get(request.data + if (page > 1) page else "", headers = ua).document
+
+        if (request.name == "Rekomendasi") {
+            val home = doc.select("div.wrapper-2-a article").mapNotNull { article ->
+                val a = article.selectFirst("a[href]") ?: return@mapNotNull null
+                val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+                val title = article.selectFirst("div.title-post2")?.text()?.trim()
+                    ?.ifBlank { null } ?: return@mapNotNull null
+                val img = article.selectFirst("img")?.let {
+                    it.attr("data-src").ifBlank { it.attr("src").ifBlank { null } }
+                }
+                newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = img }
+            }.distinctBy { it.url }
+            return newHomePageResponse(request.name, home)
+        }
+
         val home = doc.select("article, div.item, div.animepost").mapNotNull { article ->
             if (getImg(article) == null) return@mapNotNull null
             val a = article.selectFirst("h2 a, h3 a, a[rel=bookmark]")
@@ -71,7 +87,13 @@ class Nimegami : MainAPI() {
                 ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
-            newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = getImg(article) }
+            val ratingText = article.selectFirst("div.rating")?.text()
+                ?.replace(Regex("[^0-9.]"), "") ?: ""
+            val rating = ratingText.toFloatOrNull() ?: -1f
+            newAnimeSearchResponse(title, href, TvType.Anime) {
+                this.posterUrl = getImg(article)
+                if (rating >= 0f) this.rating = rating
+            }
         }.distinctBy { it.url }
         return newHomePageResponse(request.name, home)
     }
