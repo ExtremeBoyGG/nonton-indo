@@ -47,7 +47,7 @@
 | AnimeIndo | anime-indo.lol | ✅ Stable |
 | Oploverz | oploverz.ch | Development |
 | Otakudesu | otakudesu.blog | ✅ Stable |
-| Nimegami | nimegami.id | Development |
+| Nimegami | nimegami.id | ✅ Stable |
 | Animasu | animasuid.com | Development |
 | Kuramanime | kuramanime.ink | Development |
 | Samehadaku | v2.samehadaku.how | Development |
