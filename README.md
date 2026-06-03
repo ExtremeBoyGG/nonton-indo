@@ -56,6 +56,7 @@
 
 | Plugin | Situs | Status |
 |--------|-------|--------|
+| MovieBox | themoviebox.org | ✅ Stable |
 | Pahe | pahe.ink | Development |
 | Rebahin | rebahin | ✅ Stable |
 | Idlix | idlix | Development |
