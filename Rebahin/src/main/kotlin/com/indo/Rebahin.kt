@@ -3,9 +3,7 @@ package com.indo
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import org.json.JSONArray
 import org.json.JSONObject
-import org.jsoup.nodes.Element
 
 class Rebahin : MainAPI() {
     override var mainUrl = "https://139.59.197.199"
@@ -19,85 +17,42 @@ class Rebahin : MainAPI() {
         "$mainUrl/" to "Home"
     )
 
-    private fun Element.href() = attr("href").ifBlank { null }
-    private fun Element.src() = attr("src").ifBlank { null }
-
-    private val allowedSections = listOf(
-        "Trending Now", "Movies Terbaru", "Popular TV Series",
-        "Action Movies", "Drama Movies", "Animation Movies",
-        "War Movies", "Philiphines Movies"
-    )
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) return newHomePageResponse(request.name, emptyList())
-        val resp = app.get("$mainUrl/")
-        val html = (resp.text ?: "").replace("\\\"", "\"")
+        val doc = app.get("$mainUrl/").document
         val sections = mutableListOf<HomePageList>()
 
-        // Extract named sections: {"title":"Section Name","items":[...}
-        val sectionRegex = Regex("\"title\":\"([^\"]+)\"\\s*,\\s*\"items\":\\[")
-        sectionRegex.findAll(html).forEach { match ->
-            val name = match.groupValues[1]
-            if (name !in allowedSections) return@forEach
-            val arrStart = html.indexOf('[', match.range.last) + 1
-            if (arrStart <= 0) return@forEach
-            val arrEnd = findMatchingBraceAny(html, arrStart - 1, ']')
-            if (arrEnd < 0) return@forEach
-            val items = parseItemsJson(html.substring(arrStart, arrEnd))
+        doc.select("section").forEach { section ->
+            val titleEl = section.selectFirst("h2") ?: return@forEach
+            val name = titleEl.text().trim()
+            if (name.isBlank()) return@forEach
+
+            val items = section.select("a[href^=/movies/], a[href^=/tv/]").mapNotNull { a ->
+                val href = a.attr("href").ifBlank { return@mapNotNull null }
+                val img = a.selectFirst("img") ?: return@mapNotNull null
+                val title = img.attr("alt").ifBlank { return@mapNotNull null }
+                var poster = img.attr("src").ifBlank { null }
+                if (poster != null && poster.startsWith("/_next/image")) {
+                    poster = Regex("url=([^&]+)").find(poster)?.groupValues?.getOrNull(1)?.let {
+                        java.net.URLDecoder.decode(it, "UTF-8")
+                    }
+                }
+                val isSeries = href.startsWith("/tv/")
+                val ratingEl = a.selectFirst("div.absolute.top-2.right-2")
+                val voteAvg = ratingEl?.text()?.trim()?.toDoubleOrNull()
+                if (isSeries)
+                    newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) {
+                        this.posterUrl = poster; this.score = Score.from10(voteAvg)
+                    }
+                else
+                    newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
+                        this.posterUrl = poster; this.score = Score.from10(voteAvg)
+                    }
+            }
             if (items.isNotEmpty()) sections.add(HomePageList(name, items))
         }
 
-        // Extract Trending Now section (has no title, first items array in page)
-        if (sections.none { it.name == "Trending Now" }) {
-            val firstItems = Regex("""\"items\":\[""").find(html)?.let { match ->
-                val start = html.indexOf('[', match.range.last) + 1
-                if (start > 0) {
-                    val end = findMatchingBraceAny(html, start - 1, ']')
-                    if (end >= 0) parseItemsJson(html.substring(start, end)) else null
-                } else null
-            }
-            if (firstItems != null && firstItems.isNotEmpty()) {
-                sections.add(0, HomePageList("Trending Now", firstItems))
-            }
-        }
-
-        if (sections.isEmpty()) {
-            val doc = resp.document
-            val home = doc.select("a[href^=/movies/], a[href^=/tv/]")
-                .filter { it.selectFirst("img") != null }
-                .mapNotNull { parseCard(it) }
-                .distinctBy { it.url }
-            if (home.isNotEmpty()) sections.add(HomePageList("Film Terbaru", home))
-        }
         return newHomePageResponse(sections)
-    }
-
-    private fun parseItemsJson(json: String): List<SearchResponse> {
-        val items = mutableListOf<SearchResponse>()
-        var objPos = 0
-        while (true) {
-            val objStart = json.indexOf('{', objPos)
-            if (objStart < 0) break
-            val objEnd = findMatchingBraceAny(json, objStart, '}')
-            if (objEnd < 0) break
-            val obj = json.substring(objStart, objEnd + 1)
-            val id = Regex("\"id\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
-            val title = Regex("\"title\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
-            val posterPath = Regex("\"posterPath\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
-            val type = Regex("\"type\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
-            val voteAvg = Regex("\"voteAverage\":([0-9.]+)").find(obj)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
-            if (id != null && title != null) {
-                val poster = if (posterPath != null) "https://image.tmdb.org/t/p/w500$posterPath" else null
-                val href = if (type == "tv") "/tv/$id" else "/movies/$id"
-                val sr = if (type == "tv")
-                    newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster; this.score = Score.from10(voteAvg) }
-                else
-                    newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster; this.score = Score.from10(voteAvg) }
-                items.add(sr)
-            }
-            objPos = objEnd + 1
-        }
-        return items
     }
 
     private fun findMatchingBraceAny(s: String, start: Int, close: Char): Int {
@@ -116,24 +71,6 @@ class Rebahin : MainAPI() {
             i++
         }
         return if (depth == 0) i - 1 else -1
-    }
-
-    private fun parseCard(a: Element): SearchResponse? {
-        val href = a.href() ?: return null
-        val img = a.selectFirst("img") ?: return null
-        val title = img.attr("alt").ifBlank { null } ?: return null
-        var poster = img.src()
-        if (poster != null && poster.startsWith("/_next/image")) {
-            poster = Regex("url=([^&]+)").find(poster)?.groupValues?.getOrNull(1)?.let {
-                java.net.URLDecoder.decode(it, "UTF-8")
-            }
-        }
-        val isSeries = href.startsWith("/tv/")
-        return if (isSeries) {
-            newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster }
-        } else {
-            newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster }
-        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
