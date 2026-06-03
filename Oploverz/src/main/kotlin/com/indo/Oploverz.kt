@@ -147,7 +147,7 @@ class Oploverz : MainAPI() {
     private suspend fun handleBloggerUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
         // Try built-in extractor first (handles old-style pages with VIDEO_CONFIG)
         val extracted = loadExtractor(url, referer, subtitleCallback, callback)
-        if (!extracted.isNullOrEmpty()) return
+        if (extracted != null && extracted.isNotEmpty()) return
 
         // Manual parsing of the Blogger page (fallback)
         try {
