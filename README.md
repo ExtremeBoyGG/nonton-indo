@@ -44,7 +44,7 @@
 
 | Plugin | Situs | Status |
 |--------|-------|--------|
-| AnimeIndo | anime-indo.lol | Development |
+| AnimeIndo | anime-indo.lol | ✅ Stable |
 | Oploverz | oploverz.ch | Development |
 | Otakudesu | otakudesu.blog | ✅ Stable |
 | Nimegami | nimegami.id | Development |
