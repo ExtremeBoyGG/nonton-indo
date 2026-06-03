@@ -145,11 +145,10 @@ class Oploverz : MainAPI() {
     }
 
     private suspend fun handleBloggerUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
-        // Try built-in extractor first (handles old-style pages with VIDEO_CONFIG)
-        val extracted = loadExtractor(url, referer, subtitleCallback, callback)
-        if (extracted != null && extracted.isNotEmpty()) return
+        // Try built-in Blogger extractor (may produce links for old-style pages)
+        loadExtractor(url, referer, subtitleCallback, callback)
 
-        // Manual parsing of the Blogger page (fallback)
+        // Manual parsing of the Blogger page (fallback for old-style pages)
         try {
             val doc = app.get(url).document
             doc.select("script").forEach { script ->
@@ -179,7 +178,7 @@ class Oploverz : MainAPI() {
     }
 
     private data class ResponseSource(
-        @JsonProperty("play_url") val play_url: String,
-        @JsonProperty("format_id") val format_id: Int
+        @param:JsonProperty("play_url") val play_url: String,
+        @param:JsonProperty("format_id") val format_id: Int
     )
 }
