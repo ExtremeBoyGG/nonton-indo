@@ -2,11 +2,13 @@ package com.indo
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import org.json.JSONArray
+import org.json.JSONObject
+import org.jsoup.nodes.Element
 
 class Rebahin : MainAPI() {
-    // URL asli Rebahin adalah IP langsung
-    override var mainUrl = "http://139.59.78.154"
+    override var mainUrl = "https://139.59.197.199"
     override var name = "Rebahin"
     override val hasMainPage = true
     override var lang = "id"
@@ -14,82 +16,113 @@ class Rebahin : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "$mainUrl/page/" to "Film Terbaru",
-        "$mainUrl/tv/page/" to "Series Terbaru"
+        "$mainUrl/" to "Film & Series Terbaru"
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = app.get(request.data + page).document
-        val home = doc.select("article, div.item").mapNotNull { article ->
-            val a = article.selectFirst("a[href]") ?: return@mapNotNull null
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = article.selectFirst("h2, h3")?.text()?.trim()
-                ?: a.attr("title").removePrefix("Permalink to:").trim().ifBlank { null }
-                ?: return@mapNotNull null
-            val poster = article.selectFirst("img")?.attr("src")?.ifBlank { null }
-            val isSeries = href.contains("/tv/")
-            if (isSeries) {
-                newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = poster }
-            } else {
-                newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = poster }
+    private fun Element.href() = attr("href").ifBlank { null }
+    private fun Element.src() = attr("src").ifBlank { null }
+
+    private fun parseCard(a: Element): SearchResponse? {
+        val href = a.href() ?: return null
+        val img = a.selectFirst("img") ?: return null
+        val title = img.attr("alt").ifBlank { null } ?: return null
+        var poster = img.src()
+        if (poster != null && poster.startsWith("/_next/image")) {
+            poster = Regex("url=([^&]+)").find(poster)?.groupValues?.getOrNull(1)?.let {
+                java.net.URLDecoder.decode(it, "UTF-8")
             }
-        }.distinctBy { it.url }
+        }
+        val isSeries = href.startsWith("/tv/")
+        return if (isSeries) {
+            newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster }
+        } else {
+            newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster }
+        }
+    }
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        if (page > 1) return newHomePageResponse(request.name, emptyList())
+        val doc = app.get("$mainUrl/").document
+        val home = doc.select("a[href^=/movies/], a[href^=/tv/]")
+            .filter { it.selectFirst("img") != null }
+            .mapNotNull { parseCard(it) }
+            .distinctBy { it.url }
         return newHomePageResponse(request.name, home)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = app.get("$mainUrl/?s=$query").document
-        return doc.select("article, div.item").mapNotNull { article ->
-            val a = article.selectFirst("a[href]") ?: return@mapNotNull null
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = article.selectFirst("h2, h3")?.text()?.trim() ?: return@mapNotNull null
-            val poster = article.selectFirst("img")?.attr("src")?.ifBlank { null }
-            val isSeries = href.contains("/tv/")
-            if (isSeries) {
-                newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = poster }
+        val resp = app.get("$mainUrl/api/search?q=$query")
+        val text = resp.text ?: return emptyList()
+        val data = try { JSONObject(text).optJSONArray("data") } catch (e: Exception) { return emptyList() }
+        if (data == null) return emptyList()
+        return (0 until data.length()).mapNotNull { i ->
+            val item = data.optJSONObject(i) ?: return@mapNotNull null
+            val id = item.optString("id", "")
+            val title = item.optString("title", "")
+            if (id.isBlank() || title.isBlank()) return@mapNotNull null
+            val posterPath = item.optString("posterPath", "")
+            val poster = if (posterPath.isNotBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else null
+            val type = item.optString("type", "movie")
+            val href = if (type == "tv") "/tv/$id" else "/movies/$id"
+            if (type == "tv") {
+                newTvSeriesSearchResponse(title, fixUrl(href), TvType.TvSeries) { this.posterUrl = poster }
             } else {
-                newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = poster }
+                newMovieSearchResponse(title, fixUrl(href), TvType.Movie) { this.posterUrl = poster }
             }
-        }.distinctBy { it.url }
+        }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url).document
+        val resp = app.get(url)
+        val doc = resp.document
+        val raw = resp.text ?: ""
+        val html = raw.replace("\\\"", "\"")
 
-        val title = doc.selectFirst("h1")?.text()?.trim()
-            ?.replace(Regex("\\s*Sub\\s*Indo.*", RegexOption.IGNORE_CASE), "")
-            ?.replace(Regex("^Nonton\\s+Film\\s+", RegexOption.IGNORE_CASE), "")
-            ?.trim()
+        val title = doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
+            ?: doc.selectFirst("h1")?.text()?.trim()
             ?: throw ErrorLoadingException("Title not found")
 
-        val poster = doc.selectFirst("div.poster img, div.thumb img, img[src*=upload]")?.attr("src")?.ifBlank { null }
-        val description = doc.selectFirst("div.entry-content, div.entry-content-single")
-            ?.select("h2")
-            ?.firstOrNull { it.text().contains("Sinopsis", ignoreCase = true) }
-            ?.nextElementSibling()
-            ?.takeIf { it.tagName() == "p" }
-            ?.text()?.trim()
-        val tags = doc.select("a[href*=category], a[rel=category]").map { it.text() }.filter { it.isNotBlank() }
-        val year = doc.selectFirst("a[href*=/year/]")?.text()?.trim()?.toIntOrNull()
+        val poster = doc.selectFirst("meta[property=og:image]")?.attr("content")?.ifBlank { null }
+        val description = doc.selectFirst("meta[property=og:description]")?.attr("content")?.ifBlank { null }
+        val year = Regex("(20\\d{2})").find(html)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val tags = Regex("\"genres\":\\[([^\\]]+)\\]").find(html)?.let { m ->
+            Regex("\"name\":\"([^\"]+)\"").findAll(m.value).map { it.groupValues[1] }.toList()
+        } ?: doc.select("a[href*=genre], a[href*=category]").map { it.text() }.filter { it.isNotBlank() }
 
         val isSeries = url.contains("/tv/")
         return if (isSeries) {
-            // Episode list ada di div.gmr-listseries, link ke /eps/
-            val episodes = doc.select("div.gmr-listseries a[href*=/eps/]").mapNotNull { el ->
-                val href = el.attr("href").ifBlank { null } ?: return@mapNotNull null
-                val epText = el.text().trim().ifBlank { null } ?: return@mapNotNull null
-                // Text contoh: "S1 Eps1", "S1 Eps2"
-                val season = Regex("S(\\d+)", RegexOption.IGNORE_CASE)
-                    .find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                val ep = Regex("Eps?(\\d+)", RegexOption.IGNORE_CASE)
-                    .find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                newEpisode(href) {
-                    this.name = epText
-                    this.season = season
-                    this.episode = ep
+            val episodeUrls = mutableListOf<Episode>()
+            val episodesMatch = Regex("\"episodes\":\\[([^\\]]+)\\]").find(html)
+            if (episodesMatch != null) {
+                val epsJson = episodesMatch.groupValues[1]
+                Regex("\"episodeNumber\":(\\d+),\"seasonNumber\":(\\d+)").findAll(epsJson).forEach { ep ->
+                    val epNum = ep.groupValues[1].toIntOrNull()
+                    val seasonNum = ep.groupValues[2].toIntOrNull()
+                    if (epNum != null) {
+                        val slug = url.trimEnd('/').substringAfterLast("/")
+                        val epUrl = if (seasonNum != null) "$url/season-$seasonNum/episode-$epNum"
+                        else "$url/season-1/episode-$epNum"
+                        episodeUrls.add(newEpisode(epUrl) {
+                            this.name = "Eps $epNum"
+                            this.episode = epNum
+                            this.season = seasonNum ?: 1
+                        })
+                    }
                 }
-            }.distinctBy { it.data }
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+            }
+            if (episodeUrls.isEmpty()) {
+                doc.select("a[href*=/episode-]").forEach { a ->
+                    val href = a.attr("href").ifBlank { return@forEach }
+                    val epNum = Regex("episode-(\\d+)$").find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    if (epNum != null) {
+                        episodeUrls.add(newEpisode(fixUrl(href)) {
+                            this.name = "Eps $epNum"
+                            this.episode = epNum
+                        })
+                    }
+                }
+            }
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeUrls) {
                 posterUrl = poster; plot = description; this.tags = tags; this.year = year
             }
         } else {
@@ -105,22 +138,85 @@ class Rebahin : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data).document
+        val resp = app.get(data)
+        val raw = resp.text ?: return true
 
-        // Download links langsung di HTML: #download .gmr-download-list li a
-        doc.select("div#download ul.gmr-download-list li a[href]").forEach { a ->
-            val href = a.attr("href").ifBlank { null } ?: return@forEach
-            loadExtractor(fixUrl(href), data, subtitleCallback, callback)
-        }
+        // JSON inside Next.js pages has escaped quotes (\")
+        val html = raw.replace("\\\"", "\"")
 
-        // Fallback: coba iframe jika ada (untuk beberapa halaman yang embed langsung)
-        doc.select("div.tab-content iframe, div.gmr-embed-responsive iframe").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-            if (!src.contains("youtube")) {
-                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+        // Extract sources from "sources":[{...}] or "playerSources":[{...}]
+        var pos = 0
+        while (true) {
+            val srcIdx = html.indexOf("\"sources\":[", pos)
+            val playIdx = html.indexOf("\"playerSources\":[", pos)
+            val idx = when {
+                srcIdx >= 0 && playIdx >= 0 -> minOf(srcIdx, playIdx)
+                srcIdx >= 0 -> srcIdx
+                playIdx >= 0 -> playIdx
+                else -> break
+            }
+            pos = idx + 1
+            val arrayStart = html.indexOf('[', idx) + 1
+            var depth = 1
+            var end = arrayStart
+            while (depth > 0 && end < html.length) {
+                when (html[end]) {
+                    '{', '[' -> depth++
+                    '}', ']' -> depth--
+                }
+                end++
+            }
+            val arrayContent = html.substring(arrayStart, end - 1)
+            var objPos = 0
+            while (true) {
+                val objStart = arrayContent.indexOf('{', objPos)
+                if (objStart < 0) break
+                val objEnd = findMatchingBraceObj(arrayContent, objStart)
+                if (objEnd < 0) break
+                val obj = arrayContent.substring(objStart, objEnd + 1)
+                val videoUrl = Regex("\"playbackUrl\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1)
+                val quality = Regex("\"quality\":\"([^\"]+)\"").find(obj)?.groupValues?.getOrNull(1) ?: "FHD"
+                if (videoUrl != null) {
+                    callback(newExtractorLink("Rebahin", "Rebahin - $quality", videoUrl) {
+                        this.quality = parseQuality(quality)
+                        this.isM3u8 = videoUrl.contains(".m3u8", ignoreCase = true)
+                    })
+                }
+                objPos = objEnd + 1
             }
         }
-
         return true
+    }
+
+    private fun findMatchingBraceObj(s: String, start: Int): Int {
+        var depth = 1
+        var i = start + 1
+        while (depth > 0 && i < s.length) {
+            if (s[i] == '"') {
+                i++
+                while (i < s.length && s[i] != '"') {
+                    if (s[i] == '\\') i++
+                    i++
+                }
+            } else if (s[i] == '{') depth++
+            else if (s[i] == '}') depth--
+            i++
+        }
+        return if (depth == 0) i - 1 else -1
+    }
+
+    private fun parseQuality(q: String): Int {
+        return when {
+            q.contains("4K", true) || q.contains("2160", true) -> 4
+            q.contains("1080", true) -> 3
+            q.contains("720", true) -> 2
+            q.contains("480", true) || q.contains("360", true) -> 1
+            else -> 3
+        }
+    }
+
+    private fun fixUrl(url: String): String {
+        if (url.startsWith("http")) return url
+        return "$mainUrl$url"
     }
 }
