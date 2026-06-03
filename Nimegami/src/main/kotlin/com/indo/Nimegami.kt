@@ -81,7 +81,7 @@ class Nimegami : MainAPI() {
             return newHomePageResponse(request.name, home)
         }
 
-        val home = doc.select("article, div.item, div.animepost").mapNotNull { article ->
+        val home = doc.select("div.post-article article").mapNotNull { article ->
             if (getImg(article) == null) return@mapNotNull null
             val a = article.selectFirst("h2 a, h3 a, a[rel=bookmark]")
                 ?: article.select("a[href]").firstOrNull { it.text().isNotBlank() }
