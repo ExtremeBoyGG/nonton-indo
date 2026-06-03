@@ -64,9 +64,8 @@ class Nimegami : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = app.get(request.data + page, headers = ua).document
-
         if (request.name == "Rekomendasi") {
+            val doc = app.get("$mainUrl/", headers = ua).document
             val home = doc.select("div.wrapper-2-a article").mapNotNull { article ->
                 val a = article.selectFirst("a[href]") ?: return@mapNotNull null
                 val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
@@ -81,6 +80,7 @@ class Nimegami : MainAPI() {
             return newHomePageResponse(request.name, home)
         }
 
+        val doc = app.get(request.data + page, headers = ua).document
         val home = doc.select("div.post-article article").mapNotNull { article ->
             if (getImg(article) == null) return@mapNotNull null
             val a = article.selectFirst("h2 a, h3 a, a[rel=bookmark]")
