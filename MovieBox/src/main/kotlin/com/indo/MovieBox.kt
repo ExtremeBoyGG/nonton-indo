@@ -171,8 +171,9 @@ class MovieBox : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Get auth token cookie via themoviebox.org proxy
-        tokenGet("/wefeed-h5-bff/app/get-latest-app-pkgs?app_name=moviebox")
+        // Visit movie page first to establish session, then call play API
+        val dataPath = data.substringAfter(mainUrl).substringBefore("?")
+        tokenGet(dataPath)
 
         val detailPath = detailPathFromUrl(data)
         val sid = Regex("[?&](sid|id)=([^&]+)").find(data)?.groupValues?.getOrNull(2)
