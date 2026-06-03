@@ -106,15 +106,36 @@ class Hanime : MainAPI() {
 
         app.post("$apiBase/hentai_videos/$slug/play", headers = headers, json = JsonAsString("{}"))
 
-        val manifestJson = app.get("$apiBase/guest/videos/$hvId/manifest", headers = playerHeaders).text ?: return false
-        val manifestRoot = tryParseJson<Map<String, Any?>>(manifestJson) ?: return false
+        val manifestHeaders = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+            "Referer" to "https://player.hanime.tv/",
+            "Origin" to "https://player.hanime.tv",
+            "Accept" to "application/json",
+            "x-signature-version" to "web2",
+            "x-signature" to "",
+            "x-time" to "0",
+            "x-session-token" to ""
+        )
 
-        val hlsUrl = manifestRoot["url"]?.toString()
-            ?: (manifestRoot["videos_manifest"] as? Map<*, *>)
+        val manifestJson = try {
+            app.get("$apiBase/guest/videos/$hvId/manifest", headers = manifestHeaders).text
+        } catch (_: Exception) { null }
+
+        val hlsUrl = if (!manifestJson.isNullOrBlank()) {
+            val manifestRoot = tryParseJson<Map<String, Any?>>(manifestJson) ?: return false
+            manifestRoot["url"]?.toString()
+                ?: (manifestRoot["videos_manifest"] as? Map<*, *>)
+                    ?.let { m -> (m["servers"] as? List<Map<*, *>>)?.firstOrNull()
+                        ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
+                            ?.let { st -> st["url"]?.toString() } } }
+                ?: return false
+        } else {
+            (detailRoot["videos_manifest"] as? Map<*, *>)
                 ?.let { m -> (m["servers"] as? List<Map<*, *>>)?.firstOrNull()
                     ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
                         ?.let { st -> st["url"]?.toString() } } }
-            ?: return false
+                ?: return false
+        }
 
         if (hlsUrl.isBlank()) return false
 
