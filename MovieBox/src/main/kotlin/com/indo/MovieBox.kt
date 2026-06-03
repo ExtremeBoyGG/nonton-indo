@@ -37,7 +37,7 @@ class MovieBox : MainAPI() {
     }
 
     private fun detailPathFromUrl(url: String): String {
-        return url.substringAfterLast("/").substringBefore("?")
+        return url.substringBefore("?").substringAfterLast("/")
     }
 
     private fun toTvType(subjectType: Int?): TvType = when (subjectType) {
