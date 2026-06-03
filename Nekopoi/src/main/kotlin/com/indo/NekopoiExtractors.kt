@@ -58,7 +58,7 @@ class Streampoi : ExtractorApi() {
         val html = app.get(url).text
 
         val packed = Regex(
-            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?\}\s*\(\s*'([^']+)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([^']+)'\s*\.split\s*\(\s*'\|\s*'\s*\)\s*\)""",
+            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?\}\s*\(\s*'((?:[^'\\]|\\.)*+)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([^']+)'\s*\.split\s*\(\s*'\|\s*'\s*\)\s*\)""",
             RegexOption.IGNORE_CASE
         ).find(html) ?: return
 
@@ -77,7 +77,7 @@ class Streampoi : ExtractorApi() {
             }
         }
 
-        val fileUrl = Regex("""['"]file['"]\s*:\s*['"]([^'"]+)['"]""").find(result)?.groupValues?.getOrNull(1) ?: return
+        val fileUrl = Regex("""['"]file['"]\s*:\s*['"]((?:[^'"]|\\.)*+)['"]""").find(result)?.groupValues?.getOrNull(1) ?: return
 
         val quality = when {
             Regex("""\b(?:2160|4k)\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P2160.value
