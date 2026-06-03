@@ -74,7 +74,7 @@ class Nimegami : MainAPI() {
                     ?.ifBlank { null } ?: return@mapNotNull null
                 val img = article.selectFirst("img")?.let { el ->
                     val src = el.attr("data-src").ifBlank { el.attr("src").ifBlank { null } } ?: return@let null
-                    src.replace(Regex("-\d+x\d+(?=\.\w+$)"), "")
+                    src.replace(Regex("""-\d+x\d+(?=\.\w+$)"""), "")
                 }
                 newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = img }
             }.distinctBy { it.url }
