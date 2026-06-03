@@ -65,7 +65,7 @@ class Rebahin : MainAPI() {
                 }
                 objPos = objEnd + 1
             }
-            if (items.isNotEmpty()) sections.add(newHomePageList(name, items))
+            if (items.isNotEmpty()) sections.add(HomePageList(name, items))
         }
         if (sections.isEmpty()) {
             // Fallback: parse HTML cards
@@ -74,7 +74,7 @@ class Rebahin : MainAPI() {
                 .filter { it.selectFirst("img") != null }
                 .mapNotNull { parseCard(it) }
                 .distinctBy { it.url }
-            if (home.isNotEmpty()) sections.add(newHomePageList("Film Terbaru", home))
+            if (home.isNotEmpty()) sections.add(HomePageList("Film Terbaru", home))
         }
         return newHomePageResponse(sections)
     }
