@@ -17,12 +17,11 @@ class Donghub : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "$mainUrl/" to "Rilis Terbaru",
+        "$mainUrl/" to "Home",
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = app.get(if (page > 1) "$mainUrl/page/$page/" else mainUrl).document
-        val items = doc.select("div.listupd article.bs").mapNotNull { item ->
+    private fun parseItems(doc: Document, selector: String): List<SearchResponse> {
+        return doc.select(selector).mapNotNull { item ->
             val a = item.selectFirst(".bsx > a") ?: return@mapNotNull null
             val href = a.attr("href")
             val title = item.selectFirst(".eggtitle")?.text()?.trim()?.ifBlank { null }
@@ -41,8 +40,25 @@ class Donghub : MainAPI() {
                 addSub(epNum)
             }
         }.distinctBy { it.url }
+    }
 
-        return newHomePageResponse(request.name, items)
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val doc = app.get(if (page > 1) "$mainUrl/page/$page/" else mainUrl).document
+
+        if (page > 1) {
+            val items = parseItems(doc, "div.listupd article.bs")
+            return newHomePageResponse(request.name, items)
+        }
+
+        val sections = mutableListOf<HomePageList>()
+
+        val popular = parseItems(doc, ".listupd.popularslider article.bs")
+        if (popular.isNotEmpty()) sections.add(HomePageList("Popular Today", popular))
+
+        val latest = parseItems(doc, ".listupd.normal article.bs")
+        if (latest.isNotEmpty()) sections.add(HomePageList("Latest Release", latest))
+
+        return newHomePageResponse(sections)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
