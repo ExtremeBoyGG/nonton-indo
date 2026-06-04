@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import java.security.MessageDigest
 
 class MovieBox : MainAPI() {
     override var mainUrl = "https://themoviebox.org"
@@ -17,7 +18,7 @@ class MovieBox : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
     override val mainPage = mainPageOf(
-        "872031290915189720" to "Trending🔥",
+        "872031290915189720" to "Trending",
         "4380734070238626200" to "K-Drama: New Release",
         "6528093688173053896" to "Trending Indonesia"
     )
@@ -28,8 +29,33 @@ class MovieBox : MainAPI() {
         "X-Client-Info" to "{\"timezone\":\"Asia/Jakarta\"}"
     )
 
+    private fun clientTimeToken(): String {
+        val ts = (System.currentTimeMillis() / 1000).toInt()
+        val rev = ts.toString().reversed()
+        val md5 = MessageDigest.getInstance("MD5").digest(rev.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return "$ts,$md5"
+    }
+
     private suspend fun apiGet(path: String): String {
         return app.get("$apiBase$path", headers = baseHeaders).text
+    }
+
+    private suspend fun apiPost(path: String, body: String): String {
+        val headers = baseHeaders + mapOf(
+            "Content-Type" to "application/json",
+            "X-Request-Lang" to "en",
+            "X-Client-Token" to clientTimeToken()
+        )
+        return app.post("$apiBase$path", body = body, headers = headers, referer = "$mainUrl/").text
+    }
+
+    private suspend fun apiGetWithToken(path: String): String {
+        val headers = baseHeaders + mapOf(
+            "X-Request-Lang" to "en",
+            "X-Client-Token" to clientTimeToken()
+        )
+        return app.get("$apiBase$path", headers = headers, referer = "$mainUrl/").text
     }
 
     private suspend fun tokenGet(path: String): String {
@@ -88,7 +114,7 @@ class MovieBox : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val rankingId = request.data
-        val raw = apiGet("/wefeed-h5api-bff/ranking-list/content?id=$rankingId&page=$page&perPage=12")
+        val raw = apiGetWithToken("/wefeed-h5api-bff/ranking-list/content?id=$rankingId&page=$page&perPage=12")
         val items = toSubjectList(raw)
             .mapNotNull { toSearchResponseFromSubject(it) }
             .distinctBy { it.url }
@@ -97,20 +123,22 @@ class MovieBox : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val pools = mainPage.flatMap { (_, id) ->
-            val raw = apiGet("/wefeed-h5api-bff/ranking-list/content?id=$id&page=1&perPage=24")
-            toSubjectList(raw)
-        }
+        val body = """{"keyword":"$query","page":1,"perPage":28,"subjectType":0}"""
+        val raw = apiPost("/wefeed-h5api-bff/subject/search", body)
+        val root = tryParseJson<Map<String, Any?>>(raw)
+        val data = root?.get("data") as? Map<*, *> ?: return emptyList()
+        val items = data["items"] as? List<*> ?: return emptyList()
 
-        return pools
-            .distinctBy { it["detailPath"]?.toString() }
-            .filter { (it["title"]?.toString() ?: "").contains(query, ignoreCase = true) }
+        return items
+            .mapNotNull { it as? Map<String, Any?> }
+            .filter { it["detailPath"]?.toString()?.isNotBlank() == true }
             .mapNotNull { toSearchResponseFromSubject(it) }
+            .distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val detailPath = detailPathFromUrl(url)
-        val raw = apiGet("/wefeed-h5api-bff/detail?detailPath=$detailPath")
+        val raw = apiGetWithToken("/wefeed-h5api-bff/detail?detailPath=$detailPath")
 
         val root = tryParseJson<Map<String, Any?>>(raw) ?: throw ErrorLoadingException("Invalid detail response")
         val data = root["data"] as? Map<*, *> ?: throw ErrorLoadingException("Missing data")
@@ -125,6 +153,7 @@ class MovieBox : MainAPI() {
         val poster = (subject["cover"] as? Map<*, *>)?.get("url")?.toString()
         val tags = subject["genre"]?.toString()?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
         val year = subject["releaseDate"]?.toString()?.take(4)?.toIntOrNull()
+        val dubs = (subject["dubs"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
 
         val seasons = (resource?.get("seasons") as? List<*>)
             ?.mapNotNull { it as? Map<*, *> }
@@ -134,6 +163,10 @@ class MovieBox : MainAPI() {
 
         if (isSeriesLike) {
             val episodes = mutableListOf<Episode>()
+
+            val primaryDubs = dubs.filter { it["type"] as? Int == 5 || it["type"] as? Int == 0 }
+            val primaryDub = primaryDubs.firstOrNull()
+            val dubSubjectId = primaryDub?.get("subjectId")?.toString() ?: subjectId
 
             seasons.forEach { s ->
                 val seasonNo = toInt(s["se"]) ?: return@forEach
@@ -146,7 +179,7 @@ class MovieBox : MainAPI() {
                 }
 
                 eps.forEach { ep ->
-                    episodes.add(newEpisode("$mainUrl/moviesDetail/$detailPath?sid=$subjectId&se=$seasonNo&ep=$ep") {
+                    episodes.add(newEpisode("$mainUrl/moviesDetail/$detailPath?sid=$dubSubjectId&se=$seasonNo&ep=$ep") {
                         this.season = seasonNo
                         this.episode = ep
                         this.name = "Episode $ep"
@@ -184,7 +217,7 @@ class MovieBox : MainAPI() {
         val ep = Regex("[?&]ep=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
 
         val subjectId = if (!sid.isNullOrBlank()) sid else {
-            val detRaw = apiGet("/wefeed-h5api-bff/detail?detailPath=$detailPath")
+            val detRaw = apiGetWithToken("/wefeed-h5api-bff/detail?detailPath=$detailPath")
             val detRoot = tryParseJson<Map<String, Any?>>(detRaw)
             val detData = detRoot?.get("data") as? Map<*, *>
             val subject = detData?.get("subject") as? Map<*, *>
@@ -193,9 +226,20 @@ class MovieBox : MainAPI() {
 
         if (subjectId.isBlank()) return false
 
-        val referer = "$mainUrl/movies/$detailPath"
-        val playHeaders = baseHeaders + ("Referer" to referer)
-        val playRaw = app.get("$mainUrl/wefeed-h5api-bff/subject/play?subjectId=$subjectId&se=$se&ep=$ep&detailPath=$detailPath", headers = playHeaders).text
+        val headers = mapOf(
+            "Accept" to "application/json",
+            "User-Agent" to USER_AGENT,
+            "X-Client-Info" to "{\"timezone\":\"Asia/Jakarta\"}",
+            "X-Request-Lang" to "en",
+            "X-Client-Token" to clientTimeToken(),
+            "Referer" to "$mainUrl/movies/$detailPath"
+        )
+
+        val playRaw = app.get(
+            "$mainUrl/wefeed-h5api-bff/subject/play?subjectId=$subjectId&se=$se&ep=$ep&detailPath=$detailPath",
+            headers = headers
+        ).text
+
         val playRoot = tryParseJson<Map<String, Any?>>(playRaw)
         val playData = playRoot?.get("data") as? Map<*, *> ?: return false
         val hasResource = playData["hasResource"] as? Boolean ?: false
