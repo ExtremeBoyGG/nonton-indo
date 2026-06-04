@@ -57,7 +57,7 @@ class Donghub : MainAPI() {
             val latest = parseItems(doc, ".listupd.normal article.bs")
             (popular + latest).distinctBy { it.url }
         } else {
-            parseItems(doc, "div.listupd article.bs")
+            parseItems(doc, ".listupd.normal article.bs")
         }
 
         return newHomePageResponse(request.name, items)
