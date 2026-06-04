@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.nicehttp.JsonAsString
 import java.security.MessageDigest
 
 class MovieBox : MainAPI() {
@@ -41,14 +42,14 @@ class MovieBox : MainAPI() {
         return app.get("$apiBase$path", headers = baseHeaders).text
     }
 
-    private suspend fun apiPost(path: String, body: String): String {
+    private suspend fun apiPost(path: String, data: String): String {
         val headers = baseHeaders + mapOf(
             "Content-Type" to "application/json",
             "Authorization" to "",
             "X-Request-Lang" to "en",
             "X-Client-Token" to clientTimeToken()
         )
-        return app.post("$apiBase$path", json = body, headers = headers, referer = "$mainUrl/").text
+        return app.post("$apiBase$path", json = JsonAsString(data), headers = headers, referer = "$mainUrl/").text ?: ""
     }
 
     private suspend fun apiGetWithToken(path: String): String {
