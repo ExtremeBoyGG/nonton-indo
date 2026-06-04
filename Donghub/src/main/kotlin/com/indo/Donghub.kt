@@ -24,17 +24,23 @@ class Donghub : MainAPI() {
         return doc.select(selector).mapNotNull { item ->
             val a = item.selectFirst(".bsx > a") ?: return@mapNotNull null
             val href = a.attr("href")
-            val title = item.selectFirst(".eggtitle")?.text()?.trim()?.ifBlank { null }
-                ?: item.selectFirst(".tt h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
             val poster = item.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
             val type = item.selectFirst(".eggtype")?.text()?.trim()
                 ?: item.selectFirst(".typez")?.text()?.trim()
-            val epText = item.selectFirst(".eggepisode")?.text()?.trim()
-            val epNum = Regex("""(\d+)""").find(epText ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
             val tvType = when (type) {
                 "Movie" -> TvType.AnimeMovie
                 else -> TvType.Anime
             }
+
+            val title = item.selectFirst(".eggtitle")?.text()?.trim()?.ifBlank { null }
+                ?: item.selectFirst(".tt")?.ownText()?.trim()?.ifBlank { null }
+                ?: item.selectFirst(".tt h2")?.text()?.trim()?.ifBlank { null }
+                ?: return@mapNotNull null
+
+            val epText = item.selectFirst(".eggepisode")?.text()?.trim()
+                ?: item.selectFirst(".bt .epx")?.text()?.trim()
+            val epNum = Regex("""(\d+)""").find(epText ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
+
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
                 addSub(epNum)
@@ -63,25 +69,7 @@ class Donghub : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val doc = app.get("$mainUrl/?s=$query").document
-        return doc.select("div.listupd article.bs").mapNotNull { item ->
-            val a = item.selectFirst(".bsx > a") ?: return@mapNotNull null
-            val href = a.attr("href")
-            val title = item.selectFirst(".eggtitle")?.text()?.trim()?.ifBlank { null }
-                ?: item.selectFirst(".tt h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
-            val poster = item.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
-            val type = item.selectFirst(".eggtype")?.text()?.trim()
-                ?: item.selectFirst(".typez")?.text()?.trim()
-            val epText = item.selectFirst(".eggepisode")?.text()?.trim()
-            val epNum = Regex("""(\d+)""").find(epText ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
-            val tvType = when (type) {
-                "Movie" -> TvType.AnimeMovie
-                else -> TvType.Anime
-            }
-            newAnimeSearchResponse(title, href, tvType) {
-                this.posterUrl = poster
-                addSub(epNum)
-            }
-        }.distinctBy { it.url }
+        return parseItems(doc, "div.listupd article.bs")
     }
 
     private fun episodeToSeriesUrl(url: String): String? {
