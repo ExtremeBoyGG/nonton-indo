@@ -166,5 +166,19 @@
         "internalName": "MovieBox",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/MovieBox.cs3",
         "name": "MovieBox"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://donghub.vip&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Anime", "AnimeMovie"],
+        "version": 1,
+        "internalName": "Donghub",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Donghub.cs3",
+        "name": "Donghub"
     }
 ]
