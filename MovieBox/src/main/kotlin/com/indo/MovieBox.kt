@@ -274,31 +274,6 @@ class MovieBox : MainAPI() {
             val hasResource = playData["hasResource"] as? Boolean ?: false
             if (!hasResource) continue
 
-            val subtitlesArray = (playData["subtitles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-            if (subtitlesArray.isNotEmpty()) {
-                subtitlesArray.forEach { sub ->
-                    val lang = sub["language"]?.toString() ?: sub["lang"]?.toString() ?: dubName
-                    val subUrl = sub["url"]?.toString()?.takeIf { it.isNotBlank() }
-                        ?: sub["file"]?.toString()?.takeIf { it.isNotBlank() }
-                        ?: sub["src"]?.toString()?.takeIf { it.isNotBlank() }
-                    if (subUrl != null) {
-                        subtitleCallback(SubtitleFile(lang, subUrl))
-                    }
-                    val subData = sub["data"]?.toString()?.takeIf { it.isNotBlank() }
-                    if (subData != null) {
-                        subtitleCallback(SubtitleFile(lang, subData))
-                    }
-                }
-            }
-
-            val subtitleUrl = playData["getSubUrl"]?.toString()?.takeIf { it.isNotBlank() }
-                ?: playData["subtitleUrl"]?.toString()?.takeIf { it.isNotBlank() }
-                ?: playData["subUrl"]?.toString()?.takeIf { it.isNotBlank() }
-                ?: playData["subtitleLink"]?.toString()?.takeIf { it.isNotBlank() }
-            if (subtitleUrl != null) {
-                subtitleCallback(SubtitleFile(dubName, subtitleUrl))
-            }
-
             val streams = (playData["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
             val hls = (playData["hls"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
             val dash = (playData["dash"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
@@ -307,12 +282,7 @@ class MovieBox : MainAPI() {
             all.forEach { item ->
                 val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
                 val res = item["resolutions"]?.toString()
-
-                val itemSubUrl = item["subtitles"]?.toString()?.takeIf { it.isNotBlank() }
-                    ?: item["subUrl"]?.toString()?.takeIf { it.isNotBlank() }
-                if (itemSubUrl != null) {
-                    subtitleCallback(SubtitleFile("${dubName} ${res ?: ""}", itemSubUrl))
-                }
+                val streamId = item["id"]?.toString()?.takeIf { it.isNotBlank() }
 
                 val label = if (dubs.isNotEmpty()) "$dubName ${res ?: "Auto"}" else "${res ?: "Auto"}"
 
@@ -329,6 +299,22 @@ class MovieBox : MainAPI() {
                     this.referer = "$mainUrl/"
                 })
                 found = true
+
+                if (streamId != null) {
+                    val capRaw = app.get(
+                        "$apiBase/wefeed-h5api-bff/subject/caption?format=MP4&id=$streamId&subjectId=$dubId&detailPath=$detailPath",
+                        headers = headers
+                    ).text
+                    val capRoot = tryParseJson<Map<String, Any?>>(capRaw)
+                    val capData = capRoot?.get("data") as? Map<*, *>
+                    val captions = capData?.get("captions") as? List<*>
+                    captions?.forEach { cap ->
+                        val capMap = cap as? Map<*, *> ?: return@forEach
+                        val capUrl = capMap["url"]?.toString()?.takeIf { it.isNotBlank() } ?: return@forEach
+                        val capLang = capMap["lanName"]?.toString() ?: capMap["lan"]?.toString() ?: "Unknown"
+                        subtitleCallback(SubtitleFile(capLang, capUrl))
+                    }
+                }
             }
         }
 
