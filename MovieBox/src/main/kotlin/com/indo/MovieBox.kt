@@ -216,15 +216,21 @@ class MovieBox : MainAPI() {
         val se = Regex("[?&]se=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
         val ep = Regex("[?&]ep=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
 
-        val subjectId = if (!sid.isNullOrBlank()) sid else {
-            val detRaw = apiGetWithToken("/wefeed-h5api-bff/detail?detailPath=$detailPath")
-            val detRoot = tryParseJson<Map<String, Any?>>(detRaw)
-            val detData = detRoot?.get("data") as? Map<*, *>
-            val subject = detData?.get("subject") as? Map<*, *>
-            subject?.get("subjectId")?.toString().orEmpty()
-        }
+        val detRaw = apiGetWithToken("/wefeed-h5api-bff/detail?detailPath=$detailPath")
+        val detRoot = tryParseJson<Map<String, Any?>>(detRaw)
+        val detData = detRoot?.get("data") as? Map<*, *>
+        val detSubject = detData?.get("subject") as? Map<*, *>
 
+        val subjectId = if (!sid.isNullOrBlank()) sid else detSubject?.get("subjectId")?.toString().orEmpty()
         if (subjectId.isBlank()) return false
+
+        val dubs = (detSubject?.get("dubs") as? List<*>)
+            ?.mapNotNull { it as? Map<*, *> }
+            .orEmpty()
+
+        val allDubs = dubs.ifEmpty {
+            listOf(mapOf<String, Any?>("subjectId" to subjectId, "lanName" to "Original"))
+        }
 
         val headers = mapOf(
             "Accept" to "application/json",
@@ -235,38 +241,53 @@ class MovieBox : MainAPI() {
             "Referer" to "$mainUrl/movies/$detailPath"
         )
 
-        val playRaw = app.get(
-            "$mainUrl/wefeed-h5api-bff/subject/play?subjectId=$subjectId&se=$se&ep=$ep&detailPath=$detailPath",
-            headers = headers
-        ).text
+        var found = false
 
-        val playRoot = tryParseJson<Map<String, Any?>>(playRaw)
-        val playData = playRoot?.get("data") as? Map<*, *> ?: return false
-        val hasResource = playData["hasResource"] as? Boolean ?: false
-        if (!hasResource) return false
+        for (dub in allDubs) {
+            val dubId = dub["subjectId"]?.toString() ?: continue
+            val dubName = dub["lanName"]?.toString() ?: "Unknown"
 
-        val streams = (playData["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-        val hls = (playData["hls"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-        val all = streams + hls
+            val playRaw = app.get(
+                "$mainUrl/wefeed-h5api-bff/subject/play?subjectId=$dubId&se=$se&ep=$ep&detailPath=$detailPath",
+                headers = headers
+            ).text
 
-        all.forEach { item ->
-            val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
-            val res = item["resolutions"]?.toString()
+            val playRoot = tryParseJson<Map<String, Any?>>(playRaw) ?: continue
+            val playData = playRoot["data"] as? Map<*, *> ?: continue
+            val hasResource = playData["hasResource"] as? Boolean ?: false
+            if (!hasResource) continue
 
-            val q = when {
-                (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
-                (res ?: "").contains("720") || u.contains("720", true) -> Qualities.P720.value
-                (res ?: "").contains("480") || u.contains("480", true) -> Qualities.P480.value
-                (res ?: "").contains("360") || u.contains("360", true) -> Qualities.P360.value
-                else -> Qualities.Unknown.value
+            val subtitleUrl = playData["getSubUrl"]?.toString()?.takeIf { it.isNotBlank() }
+            if (subtitleUrl != null) {
+                subtitleCallback(SubtitleFile(dubName, subtitleUrl))
             }
 
-            callback(newExtractorLink(name, "$name ${res ?: "Auto"}", u) {
-                this.quality = q
-                this.referer = "$mainUrl/"
-            })
+            val streams = (playData["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+            val hls = (playData["hls"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+            val all = streams + hls
+
+            all.forEach { item ->
+                val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
+                val res = item["resolutions"]?.toString()
+
+                val label = if (dubs.isNotEmpty()) "$dubName ${res ?: "Auto"}" else "${res ?: "Auto"}"
+
+                val q = when {
+                    (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
+                    (res ?: "").contains("720") || u.contains("720", true) -> Qualities.P720.value
+                    (res ?: "").contains("480") || u.contains("480", true) -> Qualities.P480.value
+                    (res ?: "").contains("360") || u.contains("360", true) -> Qualities.P360.value
+                    else -> Qualities.Unknown.value
+                }
+
+                callback(newExtractorLink(name, label, u) {
+                    this.quality = q
+                    this.referer = "$mainUrl/"
+                })
+                found = true
+            }
         }
 
-        return all.isNotEmpty()
+        return found
     }
 }
