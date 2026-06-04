@@ -18,7 +18,8 @@ class Donghub : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "$mainUrl/" to "Home",
+        "$mainUrl/" to "Popular Today",
+        "$mainUrl/" to "Latest Release",
     )
 
     private fun parseItems(doc: Document, selector: String): List<SearchResponse> {
@@ -50,16 +51,14 @@ class Donghub : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = app.get(if (page > 1) "$mainUrl/page/$page/" else mainUrl).document
-
-        val items = if (page == 1) {
-            val popular = parseItems(doc, ".listupd.popularslider article.bs")
-            val latest = parseItems(doc, ".listupd.normal article.bs")
-            (popular + latest).distinctBy { it.url }
-        } else {
-            parseItems(doc, ".listupd.normal article.bs")
+        if (request.name == "Popular Today") {
+            val doc = app.get(mainUrl).document
+            val items = parseItems(doc, ".listupd.popularslider article.bs")
+            return newHomePageResponse(request.name, items)
         }
 
+        val doc = app.get(if (page > 1) "$mainUrl/page/$page/" else mainUrl).document
+        val items = parseItems(doc, ".listupd.normal article.bs")
         return newHomePageResponse(request.name, items)
     }
 
