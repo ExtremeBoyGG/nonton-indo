@@ -52,20 +52,15 @@ class Donghub : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val doc = app.get(if (page > 1) "$mainUrl/page/$page/" else mainUrl).document
 
-        if (page > 1) {
-            val items = parseItems(doc, "div.listupd article.bs")
-            return newHomePageResponse(request.name, items)
+        val items = if (page == 1) {
+            val popular = parseItems(doc, ".listupd.popularslider article.bs")
+            val latest = parseItems(doc, ".listupd.normal article.bs")
+            (popular + latest).distinctBy { it.url }
+        } else {
+            parseItems(doc, "div.listupd article.bs")
         }
 
-        val sections = mutableListOf<HomePageList>()
-
-        val popular = parseItems(doc, ".listupd.popularslider article.bs")
-        if (popular.isNotEmpty()) sections.add(HomePageList("Popular Today", popular))
-
-        val latest = parseItems(doc, ".listupd.normal article.bs")
-        if (latest.isNotEmpty()) sections.add(HomePageList("Latest Release", latest))
-
-        return newHomePageResponse(sections)
+        return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
