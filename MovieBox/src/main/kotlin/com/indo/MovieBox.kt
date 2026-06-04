@@ -274,7 +274,27 @@ class MovieBox : MainAPI() {
             val hasResource = playData["hasResource"] as? Boolean ?: false
             if (!hasResource) continue
 
+            val subtitlesArray = (playData["subtitles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+            if (subtitlesArray.isNotEmpty()) {
+                subtitlesArray.forEach { sub ->
+                    val lang = sub["language"]?.toString() ?: sub["lang"]?.toString() ?: dubName
+                    val subUrl = sub["url"]?.toString()?.takeIf { it.isNotBlank() }
+                        ?: sub["file"]?.toString()?.takeIf { it.isNotBlank() }
+                        ?: sub["src"]?.toString()?.takeIf { it.isNotBlank() }
+                    if (subUrl != null) {
+                        subtitleCallback(SubtitleFile(lang, subUrl))
+                    }
+                    val subData = sub["data"]?.toString()?.takeIf { it.isNotBlank() }
+                    if (subData != null) {
+                        subtitleCallback(SubtitleFile(lang, subData))
+                    }
+                }
+            }
+
             val subtitleUrl = playData["getSubUrl"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: playData["subtitleUrl"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: playData["subUrl"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: playData["subtitleLink"]?.toString()?.takeIf { it.isNotBlank() }
             if (subtitleUrl != null) {
                 subtitleCallback(SubtitleFile(dubName, subtitleUrl))
             }
@@ -287,13 +307,14 @@ class MovieBox : MainAPI() {
             all.forEach { item ->
                 val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
                 val res = item["resolutions"]?.toString()
-                val subUrl = item["subtitles"]?.toString()?.takeIf { it.isNotBlank() }
+
+                val itemSubUrl = item["subtitles"]?.toString()?.takeIf { it.isNotBlank() }
                     ?: item["subUrl"]?.toString()?.takeIf { it.isNotBlank() }
+                if (itemSubUrl != null) {
+                    subtitleCallback(SubtitleFile("${dubName} ${res ?: ""}", itemSubUrl))
+                }
 
                 val label = if (dubs.isNotEmpty()) "$dubName ${res ?: "Auto"}" else "${res ?: "Auto"}"
-                if (subUrl != null) {
-                    subtitleCallback(SubtitleFile("${dubName} ${res ?: ""}", subUrl))
-                }
 
                 val q = when {
                     (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
