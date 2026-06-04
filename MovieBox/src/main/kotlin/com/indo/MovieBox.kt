@@ -47,7 +47,7 @@ class MovieBox : MainAPI() {
             "X-Request-Lang" to "en",
             "X-Client-Token" to clientTimeToken()
         )
-        return app.post("$apiBase$path", body = body, headers = headers, referer = "$mainUrl/").text
+        return app.post("$apiBase$path", json = body, headers = headers, referer = "$mainUrl/").text
     }
 
     private suspend fun apiGetWithToken(path: String): String {
