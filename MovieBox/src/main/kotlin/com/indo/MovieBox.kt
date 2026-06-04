@@ -126,23 +126,8 @@ class MovieBox : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val body = """{"keyword":"$query","page":1,"perPage":28,"subjectType":0}"""
-        val raw = apiPost("/wefeed-h5api-bff/subject/search", body)
-        val root = tryParseJson<Map<String, Any?>>(raw)
-        val data = root?.get("data") as? Map<*, *>
-
-        if (data != null) {
-            val items = data["items"] as? List<*> ?: emptyList<Any>()
-            val results = items
-                .mapNotNull { it as? Map<String, Any?> }
-                .filter { it["detailPath"]?.toString()?.isNotBlank() == true }
-                .mapNotNull { toSearchResponseFromSubject(it) }
-                .distinctBy { it.url }
-            if (results.isNotEmpty()) return results
-        }
-
         val pools = mainPage.flatMap { (_, id) ->
-            val r = apiGetWithToken("/wefeed-h5api-bff/ranking-list/content?id=$id&page=1&perPage=24")
+            val r = apiGetWithToken("/wefeed-h5api-bff/ranking-list/content?id=$id&page=1&perPage=50")
             toSubjectList(r)
         }
 
