@@ -77,18 +77,7 @@ class Donghub : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val isEpisode = url.contains("-episode-", ignoreCase = true)
-        val seriesUrl = if (isEpisode) {
-            val doc = app.get(url).document
-            val breadcrumbSeries = doc.select(".ts-breadcrumb a").lastOrNull()?.attr("href")?.let { 
-                if (it.contains(mainUrl)) it else "$mainUrl$it" 
-            }
-            breadcrumbSeries?.takeIf { !it.contains("-episode-") }
-                ?: doc.select("a[href*=\"$mainUrl\"]").find { 
-                    val h = it.attr("href")
-                    h != url && !h.contains("-episode-") && h.contains(mainUrl)
-                }?.attr("href")
-                ?: episodeToSeriesUrl(url)
-        } else null
+        val seriesUrl = if (isEpisode) episodeToSeriesUrl(url) else null
 
         val animeUrl = seriesUrl ?: url
 
@@ -102,9 +91,8 @@ class Donghub : MainAPI() {
             val synopsis = episodeDoc.select(".desc p, .entry-content p").text().trim().ifBlank { null }
             val tags = episodeDoc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
 
-            // Ambil series slug untuk REST API
             val slug = animeUrl.trimEnd('/').substringAfterLast("/")
-            val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1").text
+            val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1&_fields=id").text
             val catList = tryParseJson<List<Map<String, Any?>>>(catRaw)
             val categoryId = catList?.firstOrNull()?.get("id")?.toString()
 
@@ -154,7 +142,7 @@ class Donghub : MainAPI() {
         val tags = doc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
 
         val slug = animeUrl.trimEnd('/').substringAfterLast("/")
-        val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1").text
+        val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1&_fields=id").text
         val catList = tryParseJson<List<Map<String, Any?>>>(catRaw)
         val categoryId = catList?.firstOrNull()?.get("id")?.toString()
 
