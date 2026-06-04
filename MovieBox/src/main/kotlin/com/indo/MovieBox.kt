@@ -44,6 +44,7 @@ class MovieBox : MainAPI() {
     private suspend fun apiPost(path: String, body: String): String {
         val headers = baseHeaders + mapOf(
             "Content-Type" to "application/json",
+            "Authorization" to "",
             "X-Request-Lang" to "en",
             "X-Client-Token" to clientTimeToken()
         )
@@ -52,6 +53,7 @@ class MovieBox : MainAPI() {
 
     private suspend fun apiGetWithToken(path: String): String {
         val headers = baseHeaders + mapOf(
+            "Authorization" to "",
             "X-Request-Lang" to "en",
             "X-Client-Token" to clientTimeToken()
         )
@@ -126,14 +128,27 @@ class MovieBox : MainAPI() {
         val body = """{"keyword":"$query","page":1,"perPage":28,"subjectType":0}"""
         val raw = apiPost("/wefeed-h5api-bff/subject/search", body)
         val root = tryParseJson<Map<String, Any?>>(raw)
-        val data = root?.get("data") as? Map<*, *> ?: return emptyList()
-        val items = data["items"] as? List<*> ?: return emptyList()
+        val data = root?.get("data") as? Map<*, *>
 
-        return items
-            .mapNotNull { it as? Map<String, Any?> }
-            .filter { it["detailPath"]?.toString()?.isNotBlank() == true }
+        if (data != null) {
+            val items = data["items"] as? List<*> ?: emptyList<Any>()
+            val results = items
+                .mapNotNull { it as? Map<String, Any?> }
+                .filter { it["detailPath"]?.toString()?.isNotBlank() == true }
+                .mapNotNull { toSearchResponseFromSubject(it) }
+                .distinctBy { it.url }
+            if (results.isNotEmpty()) return results
+        }
+
+        val pools = mainPage.flatMap { (_, id) ->
+            val r = apiGetWithToken("/wefeed-h5api-bff/ranking-list/content?id=$id&page=1&perPage=24")
+            toSubjectList(r)
+        }
+
+        return pools
+            .distinctBy { it["detailPath"]?.toString() }
+            .filter { (it["title"]?.toString() ?: "").contains(query, ignoreCase = true) }
             .mapNotNull { toSearchResponseFromSubject(it) }
-            .distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -235,6 +250,7 @@ class MovieBox : MainAPI() {
         val headers = mapOf(
             "Accept" to "application/json",
             "User-Agent" to USER_AGENT,
+            "Authorization" to "",
             "X-Client-Info" to "{\"timezone\":\"Asia/Jakarta\"}",
             "X-Request-Lang" to "en",
             "X-Client-Token" to clientTimeToken(),
@@ -264,13 +280,19 @@ class MovieBox : MainAPI() {
 
             val streams = (playData["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
             val hls = (playData["hls"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-            val all = streams + hls
+            val dash = (playData["dash"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+            val all = streams + hls + dash
 
             all.forEach { item ->
                 val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
                 val res = item["resolutions"]?.toString()
+                val subUrl = item["subtitles"]?.toString()?.takeIf { it.isNotBlank() }
+                    ?: item["subUrl"]?.toString()?.takeIf { it.isNotBlank() }
 
                 val label = if (dubs.isNotEmpty()) "$dubName ${res ?: "Auto"}" else "${res ?: "Auto"}"
+                if (subUrl != null) {
+                    subtitleCallback(SubtitleFile("${dubName} ${res ?: ""}", subUrl))
+                }
 
                 val q = when {
                     (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
