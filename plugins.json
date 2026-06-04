@@ -152,5 +152,19 @@
         "internalName": "Hanime",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Hanime.cs3",
         "name": "Hanime"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://themoviebox.org&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Movie", "TvSeries", "Anime"],
+        "version": 2,
+        "internalName": "MovieBox",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/MovieBox.cs3",
+        "name": "MovieBox"
     }
 ]
