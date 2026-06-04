@@ -44,22 +44,30 @@
 
 | Plugin | Situs | Status |
 |--------|-------|--------|
-| AnimeIndo | anime-indo.lol | ✅ Stable |
-| Oploverz | oploverz.ch | Development |
-| Otakudesu | otakudesu.blog | ✅ Stable |
-| Nimegami | nimegami.id | ✅ Stable |
-| Animasu | animasuid.com | Development |
-| Kuramanime | kuramanime.ink | Development |
-| Samehadaku | v2.samehadaku.how | Development |
+| <img src="https://www.google.com/s2/favicons?domain=anime-indo.lol&sz=16" width="16" height="16"> AnimeIndo | anime-indo.lol | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=oploverz.ch&sz=16" width="16" height="16"> Oploverz | oploverz.ch | Development |
+| <img src="https://www.google.com/s2/favicons?domain=otakudesu.blog&sz=16" width="16" height="16"> Otakudesu | otakudesu.blog | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=nimegami.id&sz=16" width="16" height="16"> Nimegami | nimegami.id | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=animasuid.com&sz=16" width="16" height="16"> Animasu | animasuid.com | Development |
+| <img src="https://www.google.com/s2/favicons?domain=kuramanime.ink&sz=16" width="16" height="16"> Kuramanime | kuramanime.ink | Development |
+| <img src="https://www.google.com/s2/favicons?domain=v2.samehadaku.how&sz=16" width="16" height="16"> Samehadaku | v2.samehadaku.how | Development |
 
 ### Film & Drama
 
 | Plugin | Situs | Status |
 |--------|-------|--------|
-| MovieBox | themoviebox.org | ✅ Stable |
-| Pahe | pahe.ink | Development |
-| Rebahin | rebahin | ✅ Stable |
-| Idlix | idlix | Development |
+| <img src="https://www.google.com/s2/favicons?domain=themoviebox.org&sz=16" width="16" height="16"> MovieBox | themoviebox.org | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=pahe.ink&sz=16" width="16" height="16"> Pahe | pahe.ink | Development |
+| <img src="https://www.google.com/s2/favicons?domain=rebahin&sz=16" width="16" height="16"> Rebahin | rebahin | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=idlix&sz=16" width="16" height="16"> Idlix | idlix | Development |
+
+### Lainnya
+
+| Plugin | Situs | Status |
+|--------|-------|--------|
+| <img src="https://www.google.com/s2/favicons?domain=nekopoi.care&sz=16" width="16" height="16"> Nekopoi | nekopoi.care | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=hanime.tv&sz=16" width="16" height="16"> Hanime | hanime.tv | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=167.71.237.49&sz=16" width="16" height="16"> SemiRebahin | 167.71.237.49 | Development |
 
 ---
 
