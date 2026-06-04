@@ -146,23 +146,34 @@ class MovieBox : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val token = getBearerToken()
         if (token.isNotBlank()) {
-            val body = """{"keyword":"$query","page":1,"perPage":28,"subjectType":0}"""
             val headers = baseHeaders + mapOf(
                 "Content-Type" to "application/json",
                 "Authorization" to "Bearer $token",
                 "X-Request-Lang" to "en"
             )
-            val raw = app.post("$apiBase/wefeed-h5api-bff/subject/search", json = JsonAsString(body), headers = headers, referer = "$mainUrl/").text ?: ""
-            val root = tryParseJson<Map<String, Any?>>(raw)
-            val data = root?.get("data") as? Map<*, *>
-            if (data != null) {
+            val allItems = mutableListOf<Map<String, Any?>>()
+            var page = 1
+            val maxPages = 10
+            var hasMore = true
+
+            while (page <= maxPages && hasMore) {
+                val body = """{"keyword":"$query","page":$page,"perPage":28,"subjectType":0}"""
+                val raw = app.post("$apiBase/wefeed-h5api-bff/subject/search", json = JsonAsString(body), headers = headers, referer = "$mainUrl/").text ?: ""
+                val root = tryParseJson<Map<String, Any?>>(raw)
+                val data = root?.get("data") as? Map<*, *> ?: break
+                val pager = data["pager"] as? Map<*, *>
+                hasMore = pager?.get("hasMore") as? Boolean ?: false
                 val items = data["items"] as? List<*> ?: emptyList<Any>()
-                val results = items
-                    .mapNotNull { it as? Map<String, Any?> }
+                if (items.isEmpty()) break
+                allItems.addAll(items.mapNotNull { it as? Map<String, Any?> })
+                page++
+            }
+
+            if (allItems.isNotEmpty()) {
+                return allItems
+                    .distinctBy { it["detailPath"]?.toString() }
                     .filter { it["detailPath"]?.toString()?.isNotBlank() == true }
                     .mapNotNull { toSearchResponseFromSubject(it) }
-                    .distinctBy { it.url }
-                if (results.isNotEmpty()) return results
             }
         }
 
