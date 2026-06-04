@@ -35,9 +35,6 @@ class Donghub : MainAPI() {
             }
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
-                if (!epText.isNullOrBlank()) {
-                    this.addSub(epText)
-                }
             }
         }.distinctBy { it.url }
 
@@ -61,9 +58,6 @@ class Donghub : MainAPI() {
             }
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
-                if (!epText.isNullOrBlank()) {
-                    this.addSub(epText)
-                }
             }
         }.distinctBy { it.url }
     }
@@ -101,8 +95,8 @@ class Donghub : MainAPI() {
 
         val episodes = mutableListOf<Episode>()
 
-        doc.select(".eplister > div, .eplister > a, div[class*=\"eps\"] > a, div[class*=\"epis\"] a[href*=\"-episode-\"]").forEach { el ->
-            val a = el as? Element ?: el.selectFirst("a[href]") ?: return@forEach
+        doc.select(".eplister > div, .eplister > a, div[class*=\"eps\"] > a").forEach { el ->
+            val a = if (el.tagName() == "a") el else el.selectFirst("a[href]") ?: return@forEach
             val epHref = a.attr("href").ifBlank { return@forEach }
             val epText = a.text().trim().ifBlank { return@forEach }
             val epNum = Regex("""(?:Episode|Ep|E)\s*(\d+)""", RegexOption.IGNORE_CASE).find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
