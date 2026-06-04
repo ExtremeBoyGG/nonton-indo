@@ -81,15 +81,10 @@ class Donghub : MainAPI() {
         val tvType = if (typeText?.contains("Movie") == true) TvType.AnimeMovie else TvType.Anime
 
         if (isEpisode) {
-            val seriesLink = doc.select("a[href*=\"donghub.vip\"]").find { it.text().contains(title, ignoreCase = true) && !it.attr("href").contains("-episode-") }
-            val allEpisodesUrl = seriesLink?.attr("href") ?: doc.select(".naveps .nvsc a").attr("href").ifBlank { null }
             return newMovieLoadResponse(title, url, tvType, url) {
                 this.posterUrl = poster
                 this.plot = synopsis
                 this.tags = tags
-                if (allEpisodesUrl != null) {
-                    this.addSub(allEpisodesUrl)
-                }
             }
         }
 
