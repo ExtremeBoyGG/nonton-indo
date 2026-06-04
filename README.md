@@ -51,7 +51,7 @@
 | <img src="https://www.google.com/s2/favicons?domain=animasuid.com&sz=16" width="16" height="16"> Animasu | animasuid.com | Development |
 | <img src="https://www.google.com/s2/favicons?domain=kuramanime.ink&sz=16" width="16" height="16"> Kuramanime | kuramanime.ink | Development |
 | <img src="https://www.google.com/s2/favicons?domain=v2.samehadaku.how&sz=16" width="16" height="16"> Samehadaku | v2.samehadaku.how | Development |
-| <img src="https://www.google.com/s2/favicons?domain=donghub.vip&sz=16" width="16" height="16"> Donghub | donghub.vip | Development |
+| <img src="https://www.google.com/s2/favicons?domain=donghub.vip&sz=16" width="16" height="16"> Donghub | donghub.vip | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=kuramanime.ink&sz=16" width="16" height="16"> Kuronime | kuronime.ink | Development |
 
 ### Film & Drama
