@@ -89,8 +89,8 @@ class Streampoi : ExtractorApi() {
         val fileUrl = Regex("""['"]file['"]\s*:\s*['"]((?:[^'"]|\\.)*+)['"]""").find(result)?.groupValues?.getOrNull(1) ?: return
 
         val links = M3u8Helper.generateM3u8(
-            sourceName = name,
-            masterUrl = fileUrl,
+            source = name,
+            streamUrl = fileUrl,
             referer = url,
             headers = mapOf("Referer" to url, "Origin" to mainUrl)
         )
@@ -108,71 +108,4 @@ class Streampoi : ExtractorApi() {
             }
         )
     }
-
-}
-
-        callback.invoke(
-            newExtractorLink(name, name, videoUrl) {
-                this.referer = mainUrl
-                this.quality = quality
-                this.headers = mapOf("Referer" to mainUrl, "Origin" to mainUrl)
-            }
-        )
-    }
-}
-
-class Streampoi : ExtractorApi() {
-    override val name = "Streampoi"
-    override val mainUrl = "https://streampoi.com"
-    override val requiresReferer = false
-
-    override suspend fun getUrl(
-        url: String,
-        referer: String?,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        val html = app.get(url).text
-
-        val packed = Regex(
-            """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?\}\s*\(\s*'((?:[^'\\]|\\.)*+)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([^']+)'\s*\.split\s*\(\s*'\|\s*'\s*\)\s*\)""",
-            RegexOption.IGNORE_CASE
-        ).find(html) ?: return
-
-        val encoded = packed.groupValues[1]
-        val radix = packed.groupValues[2].toIntOrNull() ?: return
-        val count = packed.groupValues[3].toIntOrNull() ?: return
-        val dictStr = packed.groupValues[4]
-        val dictionary = dictStr.split("|")
-
-        var result = encoded
-        for (i in (count - 1) downTo 0) {
-            val replacement = dictionary.getOrNull(i)
-            if (!replacement.isNullOrEmpty()) {
-                val word = i.toString(radix)
-                result = result.replace(Regex("\\b" + Regex.escape(word) + "\\b"), replacement)
-            }
-        }
-
-        val fileUrl = Regex("""['"]file['"]\s*:\s*['"]((?:[^'"]|\\.)*+)['"]""").find(result)?.groupValues?.getOrNull(1) ?: return
-
-        val quality = when {
-            Regex("""\b(?:2160|4k)\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P2160.value
-            Regex("""\b(?:1080|hd)\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P1080.value
-            Regex("""\b720\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P720.value
-            Regex("""\b480\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P480.value
-            Regex("""\b360\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileUrl) -> Qualities.P360.value
-            else -> Qualities.Unknown.value
-        }
-
-        callback.invoke(
-            newExtractorLink(name, name, fileUrl) {
-                this.referer = url
-                this.quality = quality
-                this.type = ExtractorLinkType.M3U8
-                this.headers = mapOf("Referer" to url, "Origin" to mainUrl)
-            }
-        )
-    }
-
 }
