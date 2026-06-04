@@ -18,6 +18,8 @@ class MovieBox : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
+    private var bearerToken: String? = null
+
     override val mainPage = mainPageOf(
         "872031290915189720" to "Trending",
         "4380734070238626200" to "K-Drama: New Release",
@@ -50,6 +52,22 @@ class MovieBox : MainAPI() {
             "X-Client-Token" to clientTimeToken()
         )
         return app.post("$apiBase$path", json = JsonAsString(data), headers = headers, referer = "$mainUrl/").text ?: ""
+    }
+
+    private suspend fun getBearerToken(): String {
+        bearerToken?.let { return it }
+        val headers = baseHeaders + mapOf(
+            "Authorization" to "",
+            "X-Request-Lang" to "en",
+            "X-Client-Token" to clientTimeToken()
+        )
+        val resp = app.get("$apiBase/wefeed-h5api-bff/home?host=themoviebox.org", headers = headers, referer = "$mainUrl/")
+        val xUser = resp.headers["x-user"] ?: ""
+        val token = tryParseJson<Map<String, Any?>>(xUser)?.get("token")?.toString()
+        if (!token.isNullOrBlank()) {
+            bearerToken = token
+        }
+        return bearerToken ?: ""
     }
 
     private suspend fun apiGetWithToken(path: String): String {
@@ -126,8 +144,30 @@ class MovieBox : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        val token = getBearerToken()
+        if (token.isNotBlank()) {
+            val body = """{"keyword":"$query","page":1,"perPage":28,"subjectType":0}"""
+            val headers = baseHeaders + mapOf(
+                "Content-Type" to "application/json",
+                "Authorization" to "Bearer $token",
+                "X-Request-Lang" to "en"
+            )
+            val raw = app.post("$apiBase/wefeed-h5api-bff/subject/search", json = JsonAsString(body), headers = headers, referer = "$mainUrl/").text ?: ""
+            val root = tryParseJson<Map<String, Any?>>(raw)
+            val data = root?.get("data") as? Map<*, *>
+            if (data != null) {
+                val items = data["items"] as? List<*> ?: emptyList<Any>()
+                val results = items
+                    .mapNotNull { it as? Map<String, Any?> }
+                    .filter { it["detailPath"]?.toString()?.isNotBlank() == true }
+                    .mapNotNull { toSearchResponseFromSubject(it) }
+                    .distinctBy { it.url }
+                if (results.isNotEmpty()) return results
+            }
+        }
+
         val pools = mainPage.flatMap { (_, id) ->
-            val r = apiGetWithToken("/wefeed-h5api-bff/ranking-list/content?id=$id&page=1&perPage=50")
+            val r = apiGetWithToken("/wefeed-h5api-bff/ranking-list/content?id=$id&page=1&perPage=20")
             toSubjectList(r)
         }
 
