@@ -1,6 +1,8 @@
 package com.indo
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
+import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -28,12 +30,15 @@ class Donghub : MainAPI() {
             val poster = item.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
             val type = item.selectFirst(".eggtype")?.text()?.trim()
                 ?: item.selectFirst(".typez")?.text()?.trim()
+            val epText = item.selectFirst(".eggepisode")?.text()?.trim()
+            val epNum = Regex("""(\d+)""").find(epText ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
             val tvType = when (type) {
                 "Movie" -> TvType.AnimeMovie
                 else -> TvType.Anime
             }
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
+                addSub(epNum)
             }
         }.distinctBy { it.url }
 
@@ -50,37 +55,93 @@ class Donghub : MainAPI() {
             val poster = item.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
             val type = item.selectFirst(".eggtype")?.text()?.trim()
                 ?: item.selectFirst(".typez")?.text()?.trim()
+            val epText = item.selectFirst(".eggepisode")?.text()?.trim()
+            val epNum = Regex("""(\d+)""").find(epText ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
             val tvType = when (type) {
                 "Movie" -> TvType.AnimeMovie
                 else -> TvType.Anime
             }
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
+                addSub(epNum)
             }
         }.distinctBy { it.url }
     }
 
+    private fun episodeToSeriesUrl(url: String): String? {
+        val slug = url.trimEnd('/').substringAfterLast("/")
+        val seriesSlug = Regex("-episode-\\d+.*$", RegexOption.IGNORE_CASE).replace(slug, "")
+        if (seriesSlug == slug || seriesSlug.isBlank()) return null
+        return "$mainUrl/$seriesSlug/"
+    }
+
     override suspend fun load(url: String): LoadResponse {
         val isEpisode = url.contains("-episode-", ignoreCase = true)
-
-        if (isEpisode) {
+        val seriesUrl = if (isEpisode) {
             val doc = app.get(url).document
-            val title = doc.selectFirst("h1.entry-title")?.text()?.trim()
+            val breadcrumbSeries = doc.select(".ts-breadcrumb a").lastOrNull()?.attr("href")?.let { 
+                if (it.contains(mainUrl)) it else "$mainUrl$it" 
+            }
+            breadcrumbSeries?.takeIf { !it.contains("-episode-") }
+                ?: doc.select("a[href*=\"$mainUrl\"]").find { 
+                    val h = it.attr("href")
+                    h != url && !h.contains("-episode-") && h.contains(mainUrl)
+                }?.attr("href")
+                ?: episodeToSeriesUrl(url)
+        } else null
+
+        val animeUrl = seriesUrl ?: url
+
+        if (isEpisode && seriesUrl != null) {
+            val episodeDoc = app.get(url).document
+            val title = episodeDoc.selectFirst("h1.entry-title")?.text()?.trim()
                 ?: throw ErrorLoadingException("Title not found")
-            val poster = doc.selectFirst(".single-info .thumb img")?.attr("src")
-                ?: doc.selectFirst(".thumb img")?.attr("src")
-                ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
-            val synopsis = doc.select(".desc p, .entry-content p").text().trim().ifBlank { null }
-            val tags = doc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
-            return newMovieLoadResponse(title, url, TvType.Anime, url) {
-                this.posterUrl = poster
-                this.plot = synopsis
+            val poster = episodeDoc.selectFirst(".single-info .thumb img")?.attr("src")
+                ?: episodeDoc.selectFirst(".thumb img")?.attr("src")
+                ?: episodeDoc.selectFirst("meta[property=og:image]")?.attr("content")
+            val synopsis = episodeDoc.select(".desc p, .entry-content p").text().trim().ifBlank { null }
+            val tags = episodeDoc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
+
+            // Ambil series slug untuk REST API
+            val slug = animeUrl.trimEnd('/').substringAfterLast("/")
+            val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1").text
+            val catList = tryParseJson<List<Map<String, Any?>>>(catRaw)
+            val categoryId = catList?.firstOrNull()?.get("id")?.toString()
+
+            val episodes = mutableListOf<Episode>()
+            if (categoryId != null) {
+                var apiPage = 1
+                while (true) {
+                    val postRaw = app.get("$mainUrl/wp-json/wp/v2/posts?categories=$categoryId&per_page=100&page=$apiPage&_fields=id,title,link").text
+                    val posts = tryParseJson<List<Map<String, Any?>>>(postRaw) ?: break
+                    if (posts.isEmpty()) break
+                    posts.forEach { post ->
+                        val epHref = post["link"]?.toString() ?: return@forEach
+                        val titleObj = post["title"] as? Map<*, *>
+                        val epTitle = titleObj?.get("rendered")?.toString()?.ifBlank { null } ?: return@forEach
+                        val epNum = Regex("""(?:Episode|Ep|E)\s*(\d+)""", RegexOption.IGNORE_CASE).find(epTitle)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                        episodes.add(newEpisode(epHref) {
+                            this.name = epTitle
+                            this.episode = epNum
+                            this.posterUrl = poster
+                        })
+                    }
+                    if (posts.size < 100) break
+                    apiPage++
+                }
+            }
+
+            return newAnimeLoadResponse(title, animeUrl, TvType.Anime) {
+                engName = title
+                posterUrl = poster
+                addEpisodes(DubStatus.Subbed, episodes)
+                plot = synopsis
                 this.tags = tags
             }
         }
 
-        val doc = app.get(url).document
-
+        // Series detail page
+        val doc = app.get(animeUrl).document
         val title = doc.selectFirst("h1.entry-title")?.text()?.trim()
             ?: doc.selectFirst(".infolimit h2")?.text()?.trim()
             ?: throw ErrorLoadingException("Title not found")
@@ -92,17 +153,15 @@ class Donghub : MainAPI() {
         val synopsis = doc.select(".desc p, .entry-content p").text().trim().ifBlank { null }
         val tags = doc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
 
-        val slug = url.trimEnd('/').substringAfterLast("/")
+        val slug = animeUrl.trimEnd('/').substringAfterLast("/")
         val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1").text
         val catList = tryParseJson<List<Map<String, Any?>>>(catRaw)
         val categoryId = catList?.firstOrNull()?.get("id")?.toString()
 
         val episodes = mutableListOf<Episode>()
-
         if (categoryId != null) {
             var apiPage = 1
-            var hasMore = true
-            while (hasMore) {
+            while (true) {
                 val postRaw = app.get("$mainUrl/wp-json/wp/v2/posts?categories=$categoryId&per_page=100&page=$apiPage&_fields=id,title,link").text
                 val posts = tryParseJson<List<Map<String, Any?>>>(postRaw) ?: break
                 if (posts.isEmpty()) break
@@ -117,20 +176,24 @@ class Donghub : MainAPI() {
                         this.posterUrl = poster
                     })
                 }
-                hasMore = posts.size >= 100
+                if (posts.size < 100) break
                 apiPage++
             }
         }
 
+        episodes.sortBy { it.episode }
+
         if (episodes.isNotEmpty()) {
-            return newTvSeriesLoadResponse(title, url, TvType.Anime, episodes) {
-                this.posterUrl = poster
-                this.plot = synopsis
+            return newAnimeLoadResponse(title, animeUrl, TvType.Anime) {
+                engName = title
+                posterUrl = poster
+                addEpisodes(DubStatus.Subbed, episodes)
+                plot = synopsis
                 this.tags = tags
             }
         }
 
-        return newMovieLoadResponse(title, url, TvType.Anime, url) {
+        return newMovieLoadResponse(title, animeUrl, TvType.Anime, animeUrl) {
             this.posterUrl = poster
             this.plot = synopsis
             this.tags = tags
