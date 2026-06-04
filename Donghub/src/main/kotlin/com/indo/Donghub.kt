@@ -16,34 +16,32 @@ class Donghub : MainAPI() {
 
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Rilis Terbaru",
-        "$mainUrl/page/" to "Rilis Terbaru Lanjutan",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = app.get(request.data.let { if (page > 1) it + page else it }).document
-        val sections = mutableListOf<HomePageList>()
-
-        doc.select("div.listupd article.bs").mapNotNull { item ->
+        val doc = app.get(if (page > 1) "$mainUrl/page/$page/" else mainUrl).document
+        val items = doc.select("div.listupd article.bs").mapNotNull { item ->
             val a = item.selectFirst(".bsx > a") ?: return@mapNotNull null
             val href = a.attr("href")
-            val title = a.selectFirst(".tt")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
-            val poster = a.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
-            val epx = a.selectFirst(".bt .epx")?.text()?.trim()
-            val type = a.selectFirst(".typez")?.text()?.trim()
-
+            val seriesTitle = item.selectFirst(".eggtitle")?.text()?.trim()?.ifBlank { null }
+            val epText = item.selectFirst(".eggepisode")?.text()?.trim()
+            val title = seriesTitle ?: item.selectFirst(".tt h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
+            val poster = item.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
+            val type = item.selectFirst(".eggtype")?.text()?.trim()
+                ?: item.selectFirst(".typez")?.text()?.trim()
             val tvType = when (type) {
                 "Movie" -> TvType.AnimeMovie
                 else -> TvType.Anime
             }
-
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
+                if (!epText.isNullOrBlank()) {
+                    this.addSub(epText)
+                }
             }
-        }.let { items ->
-            if (items.isNotEmpty()) sections.add(HomePageList(request.name, items))
-        }
+        }.distinctBy { it.url }
 
-        return newHomePageResponse(sections)
+        return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -51,15 +49,21 @@ class Donghub : MainAPI() {
         return doc.select("div.listupd article.bs").mapNotNull { item ->
             val a = item.selectFirst(".bsx > a") ?: return@mapNotNull null
             val href = a.attr("href")
-            val title = a.selectFirst(".tt")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
-            val poster = a.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
-            val type = a.selectFirst(".typez")?.text()?.trim()
+            val title = item.selectFirst(".eggtitle")?.text()?.trim()?.ifBlank { null }
+                ?: item.selectFirst(".tt h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
+            val poster = item.selectFirst(".limit img")?.attr("src")?.ifBlank { null }
+            val type = item.selectFirst(".eggtype")?.text()?.trim()
+                ?: item.selectFirst(".typez")?.text()?.trim()
+            val epText = item.selectFirst(".eggepisode")?.text()?.trim()
             val tvType = when (type) {
                 "Movie" -> TvType.AnimeMovie
                 else -> TvType.Anime
             }
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
+                if (!epText.isNullOrBlank()) {
+                    this.addSub(epText)
+                }
             }
         }.distinctBy { it.url }
     }
@@ -67,29 +71,61 @@ class Donghub : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url).document
 
+        val isEpisode = url.contains("-episode-", ignoreCase = true)
+
         val title = doc.selectFirst("h1.entry-title")?.text()?.trim()
             ?: doc.selectFirst(".infolimit h2")?.text()?.trim()
             ?: throw ErrorLoadingException("Title not found")
 
         val poster = doc.selectFirst(".single-info .thumb img")?.attr("src")
+            ?: doc.selectFirst(".thumb img")?.attr("src")
             ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
 
         val synopsis = doc.select(".desc p, .entry-content p").text().trim().ifBlank { null }
-
         val tags = doc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
-
         val typeText = doc.select("div.spe span:contains(Type)")?.text()?.trim()
         val tvType = if (typeText?.contains("Movie") == true) TvType.AnimeMovie else TvType.Anime
 
-        val episodes = doc.select("div[class*=\"eplist\"] > div, div.eplister > div, .eplister div[class]").mapNotNull { row ->
-            val a = row.selectFirst("a[href]") ?: return@mapNotNull null
-            val epHref = a.attr("href")
-            val epText = a.text().trim()
+        if (isEpisode) {
+            val seriesLink = doc.select("a[href*=\"donghub.vip\"]").find { it.text().contains(title, ignoreCase = true) && !it.attr("href").contains("-episode-") }
+            val allEpisodesUrl = seriesLink?.attr("href") ?: doc.select(".naveps .nvsc a").attr("href").ifBlank { null }
+            return newMovieLoadResponse(title, url, tvType, url) {
+                this.posterUrl = poster
+                this.plot = synopsis
+                this.tags = tags
+                if (allEpisodesUrl != null) {
+                    this.addSub(allEpisodesUrl)
+                }
+            }
+        }
+
+        val episodes = mutableListOf<Episode>()
+
+        doc.select(".eplister > div, .eplister > a, div[class*=\"eps\"] > a, div[class*=\"epis\"] a[href*=\"-episode-\"]").forEach { el ->
+            val a = el as? Element ?: el.selectFirst("a[href]") ?: return@forEach
+            val epHref = a.attr("href").ifBlank { return@forEach }
+            val epText = a.text().trim().ifBlank { return@forEach }
             val epNum = Regex("""(?:Episode|Ep|E)\s*(\d+)""", RegexOption.IGNORE_CASE).find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            newEpisode(epHref) {
+            episodes.add(newEpisode(epHref) {
                 this.name = epText
                 this.episode = epNum
                 this.posterUrl = poster
+            })
+        }
+
+        if (episodes.isEmpty()) {
+            doc.select("a[href*=\"/\"]").filter { a ->
+                val href = a.attr("href")
+                href.contains(url.trimEnd('/')) && href.contains("-episode-")
+            }.forEach { a ->
+                val epHref = a.attr("href")
+                val epText = a.text().trim()
+                val epNum = Regex("""(?:Episode|Ep|E)\s*(\d+)""", RegexOption.IGNORE_CASE).find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                episodes.add(newEpisode(epHref) {
+                    this.name = epText
+                    this.episode = epNum
+                    this.posterUrl = poster
+                })
             }
         }
 
