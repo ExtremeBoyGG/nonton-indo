@@ -20,9 +20,14 @@ class Playmogo : ExtractorApi() {
     ) {
         val doc = app.get(url).text
 
-        val passMd5 = Regex("/pass_md5/[^/]+/[^/\\s\"')]+").find(doc)?.value ?: return
-        val videoUrl = app.get("$mainUrl$passMd5", referer = url).text.trim()
-        if (videoUrl.isBlank()) return
+        val passMd5 = Regex("/pass_md5/([^/]+)/([^/\\s\"')]+)").find(doc) ?: return
+        val passPath = passMd5.value
+        val videoBase = app.get("$mainUrl$passPath", referer = url).text.trim()
+        if (videoBase.isBlank()) return
+
+        val token = passMd5.groupValues[2]
+        val expiry = (System.currentTimeMillis() + 86400000).toString()
+        val videoUrl = if (videoBase.endsWith("~")) "$videoBase$token?token=$token&expiry=$expiry" else videoBase
 
         val quality = when {
             Regex("""\b(?:2160|4k)\b""", RegexOption.IGNORE_CASE).containsMatchIn(videoUrl) -> Qualities.P2160.value
@@ -35,7 +40,7 @@ class Playmogo : ExtractorApi() {
 
         callback.invoke(
             newExtractorLink(name, name, videoUrl) {
-                this.referer = referer ?: url
+                this.referer = mainUrl
                 this.quality = quality
                 this.headers = mapOf("Referer" to mainUrl, "Origin" to mainUrl)
             }
@@ -89,9 +94,10 @@ class Streampoi : ExtractorApi() {
 
         callback.invoke(
             newExtractorLink(name, name, fileUrl) {
-                this.referer = referer ?: url
+                this.referer = url
                 this.quality = quality
-                this.headers = mapOf("Referer" to mainUrl, "Origin" to mainUrl)
+                this.type = ExtractorLinkType.M3U8
+                this.headers = mapOf("Referer" to url, "Origin" to mainUrl)
             }
         )
     }
