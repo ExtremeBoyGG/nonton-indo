@@ -39,7 +39,7 @@ class Hanime : MainAPI() {
         val json = app.get("https://cached.freeanimehentai.net/api/v10/search_hvs", headers = headers).text ?: return newHomePageResponse(emptyList())
         val videos = tryParseJson<List<Map<String, Any?>>>(json) ?: return newHomePageResponse(emptyList())
 
-        val items = videos.reversed().mapNotNull { video ->
+        val items = videos.reversed().take(20).mapNotNull { video ->
             val name = video["name"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
             val slug = video["slug"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
             newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
