@@ -157,14 +157,4 @@ class Hanime : MainAPI() {
 
         return true
     }
-
-    private fun toSearchResponse(video: Map<String, Any?>?): SearchResponse? {
-        val v = video ?: return null
-        val name = v["name"]?.toString()?.ifBlank { null } ?: return null
-        val slug = v["slug"]?.toString()?.ifBlank { null } ?: return null
-        return newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
-            this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
-            this.posterHeaders = mapOf("Referer" to "$mainUrl/")
-        }
-    }
 }
