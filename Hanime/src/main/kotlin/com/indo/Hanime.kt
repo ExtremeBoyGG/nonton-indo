@@ -78,7 +78,7 @@ class Hanime : MainAPI() {
 
         val title = video["name"]?.toString() ?: throw ErrorLoadingException("Title not found")
         val plot = (video["description"]?.toString() ?: "").replace(Regex("<[^>]*>"), "").ifBlank { null }
-        val poster = video["poster_url"]?.toString() ?: video["cover_url"]?.toString()
+        val poster = video["poster_url"]?.toString() ?: video["cover_url"]?.toString()?.replace("covers", "posters")?.replace("cv1", "pv1")
         val tags = (video["hentai_tags"] as? List<Map<*, *>>)?.mapNotNull { it["text"]?.toString() }.orEmpty()
         val year = video["released_at"]?.toString()?.take(4)?.toIntOrNull()
 
