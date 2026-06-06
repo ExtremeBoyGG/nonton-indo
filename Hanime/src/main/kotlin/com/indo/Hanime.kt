@@ -34,24 +34,20 @@ class Hanime : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val json = app.get("https://cached.freeanimehentai.net/api/v10/search_hvs", headers = headers).text ?: return newHomePageResponse(emptyList())
-        val videos = tryParseJson<List<Map<String, Any?>>>(json) ?: return newHomePageResponse(emptyList())
+        if (page > 1) return newHomePageResponse(emptyList())
 
-        val allItems = videos.reversed().mapNotNull { video ->
-            val name = video["name"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
-            val slug = video["slug"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
-            newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
-                this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
-                this.posterHeaders = mapOf("Referer" to "$mainUrl/")
-            }
-        }
+        val json = app.get(request.data, headers = headers).text ?: return newHomePageResponse(emptyList())
+        val root = tryParseJson<Map<String, Any?>>(json) ?: return newHomePageResponse(emptyList())
 
-        val pageSize = 20
-        val start = (page - 1) * pageSize
-        val end = minOf(start + pageSize, allItems.size)
-        val items = if (start < allItems.size) allItems.subList(start, end) else emptyList<SearchResponse>()
+        val sections = root["sections"] as? List<Map<String, Any?>> ?: return newHomePageResponse(emptyList())
+        val videosMap = (root["hentai_videos"] as? List<Map<String, Any?>>)
+            ?.associateBy { it["id"] } ?: emptyMap()
 
-        return newHomePageResponse(request.name, items)
+        return newHomePageResponse(sections.mapNotNull { section ->
+            val title = section["title"]?.toString() ?: return@mapNotNull null
+            val ids = section["hentai_video_ids"] as? List<*> ?: return@mapNotNull null
+            HomePageList(title, ids.mapNotNull { id -> toSearchResponse(videosMap[id]) })
+        })
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -159,5 +155,15 @@ class Hanime : MainAPI() {
         }
 
         return true
+    }
+
+    private fun toSearchResponse(video: Map<String, Any?>?): SearchResponse? {
+        val v = video ?: return null
+        val name = v["name"]?.toString()?.ifBlank { null } ?: return null
+        val slug = v["slug"]?.toString()?.ifBlank { null } ?: return null
+        return newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
+            this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
+            this.posterHeaders = mapOf("Referer" to "$mainUrl/")
+        }
     }
 }
