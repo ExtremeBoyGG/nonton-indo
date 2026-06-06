@@ -30,24 +30,25 @@ class Hanime : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "$apiBase/landing" to "Home"
+        "$apiBase/landing" to "Recent Uploads"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) return newHomePageResponse(emptyList())
 
-        val json = app.get(request.data, headers = headers).text ?: return newHomePageResponse(emptyList())
-        val root = tryParseJson<Map<String, Any?>>(json) ?: return newHomePageResponse(emptyList())
+        val json = app.get("https://cached.freeanimehentai.net/api/v10/search_hvs", headers = headers).text ?: return newHomePageResponse(emptyList())
+        val videos = tryParseJson<List<Map<String, Any?>>>(json) ?: return newHomePageResponse(emptyList())
 
-        val sections = root["sections"] as? List<Map<String, Any?>> ?: return newHomePageResponse(emptyList())
-        val videosMap = (root["hentai_videos"] as? List<Map<String, Any?>>)
-            ?.associateBy { it["id"] } ?: emptyMap()
+        val items = videos.reversed().mapNotNull { video ->
+            val name = video["name"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
+            val slug = video["slug"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
+            newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
+                this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
+                this.posterHeaders = mapOf("Referer" to "$mainUrl/")
+            }
+        }
 
-        return newHomePageResponse(sections.mapNotNull { section ->
-            val title = section["title"]?.toString() ?: return@mapNotNull null
-            val ids = section["hentai_video_ids"] as? List<*> ?: return@mapNotNull null
-            HomePageList(title, ids.mapNotNull { id -> toSearchResponse(videosMap[id]) })
-        })
+        return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
