@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import java.net.URLEncoder
 
 class Nekopoi : MainAPI() {
     override var mainUrl = "https://nekopoi.care"
@@ -69,12 +70,12 @@ class Nekopoi : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = app.get("$mainUrl/?s=$query&post_type=anime", headers = ua).document
-        return doc.select("div.nk-search-results ul li div.nk-search-item").mapNotNull { el ->
-            val a = el.selectFirst("a[href]") ?: return@mapNotNull null
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val doc = app.get("$mainUrl/search/$encoded/page/1/", headers = ua).document
+        return doc.select("a.nk-search-item").mapNotNull { a ->
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = el.selectFirst("div.nk-search-info h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
-            val style = el.selectFirst("div.nk-search-thumb")?.attr("style") ?: ""
+            val title = a.selectFirst("div.nk-search-info h2")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
+            val style = a.selectFirst("div.nk-search-thumb")?.attr("style") ?: ""
             val poster = Regex("url\\('([^']+)'").find(style)?.groupValues?.getOrNull(1)
             newMovieSearchResponse(title, href, TvType.NSFW) { this.posterUrl = poster }
         }
