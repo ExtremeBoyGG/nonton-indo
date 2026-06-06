@@ -34,12 +34,10 @@ class Hanime : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (page > 1) return newHomePageResponse(emptyList())
-
         val json = app.get("https://cached.freeanimehentai.net/api/v10/search_hvs", headers = headers).text ?: return newHomePageResponse(emptyList())
         val videos = tryParseJson<List<Map<String, Any?>>>(json) ?: return newHomePageResponse(emptyList())
 
-        val items = videos.reversed().take(20).mapNotNull { video ->
+        val allItems = videos.reversed().mapNotNull { video ->
             val name = video["name"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
             val slug = video["slug"]?.toString()?.ifBlank { null } ?: return@mapNotNull null
             newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
@@ -47,6 +45,11 @@ class Hanime : MainAPI() {
                 this.posterHeaders = mapOf("Referer" to "$mainUrl/")
             }
         }
+
+        val pageSize = 20
+        val start = (page - 1) * pageSize
+        val end = minOf(start + pageSize, allItems.size)
+        val items = if (start < allItems.size) allItems.subList(start, end) else emptyList<SearchResponse>()
 
         return newHomePageResponse(request.name, items)
     }
