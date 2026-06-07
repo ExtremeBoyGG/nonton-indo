@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.JsonAsString
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 class Idlix : MainAPI() {
@@ -292,9 +293,27 @@ class Idlix : MainAPI() {
             )
             val claimText = claimResp.text ?: return false
             val claimJson = JSONObject(claimText)
-            val redeemUrl = claimJson.optString("redeemUrl", "")
-            val claim = claimJson.optString("claim", "")
-            val initialMaster = claimJson.optString("initialMasterUrl", "")
+
+            var redeemUrl: String
+            var claim: String
+            var initialMaster: String
+            if (claimJson.optString("kind") == "pending") {
+                val remainingMs = claimJson.optLong("remainingMs", 0)
+                if (remainingMs > 0) delay(remainingMs + 2000)
+                val retryResp = app.post(
+                    "$mainUrl/api/watch/session/claim",
+                    json = JsonAsString("""{"gateToken":"$gateToken"}""")
+                )
+                val retryText = retryResp.text ?: return false
+                val retryJson = JSONObject(retryText)
+                redeemUrl = retryJson.optString("redeemUrl", "")
+                claim = retryJson.optString("claim", "")
+                initialMaster = retryJson.optString("initialMasterUrl", "")
+            } else {
+                redeemUrl = claimJson.optString("redeemUrl", "")
+                claim = claimJson.optString("claim", "")
+                initialMaster = claimJson.optString("initialMasterUrl", "")
+            }
 
             if (redeemUrl.isNotBlank() && claim.isNotBlank()) {
                 try {
