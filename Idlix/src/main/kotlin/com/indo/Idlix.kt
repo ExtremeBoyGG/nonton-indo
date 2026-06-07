@@ -258,7 +258,8 @@ class Idlix : MainAPI() {
         var streamUrl: String? = null
         var subtitles: List<Pair<String, String>> = emptyList()
         try {
-            val playInfoResp = app.get("$mainUrl/api/watch/play-info/$contentType/$contentId")
+            val playInfoType = if (extra.containsKey("season")) "episode" else contentType
+            val playInfoResp = app.get("$mainUrl/api/watch/play-info/$playInfoType/$contentId")
             val playInfo = JSONObject(playInfoResp.text ?: return false)
             val gateToken = playInfo.optString("gateToken", "")
             if (gateToken.isBlank()) return false
