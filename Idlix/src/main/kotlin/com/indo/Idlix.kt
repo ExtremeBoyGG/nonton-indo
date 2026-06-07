@@ -133,23 +133,44 @@ class Idlix : MainAPI() {
             try {
                 val seriesResp = app.get("$mainUrl/api/series/$slug")
                 val seriesJson = JSONObject(seriesResp.text ?: "")
-                val seasons = seriesJson.optJSONArray("seasons")
-                if (seasons != null) {
-                    for (i in 0 until seasons.length()) {
-                        val season = seasons.optJSONObject(i) ?: continue
-                        val seasonNum = season.optInt("seasonNumber", 1)
-                        val episodes = season.optJSONArray("episodes")
-                        if (episodes != null) {
-                            for (j in 0 until episodes.length()) {
-                                val ep = episodes.optJSONObject(j) ?: continue
-                                val epNum = ep.optInt("episodeNumber", 0)
-                                if (epNum > 0) {
-                                    val epName = ep.optString("title", "").ifBlank { "S${seasonNum}E$epNum" }
-                                    episodeUrls.add(newEpisode(fixUrl("/series/$slug/season/$seasonNum/episode/$epNum")) {
-                                        this.name = epName
-                                        this.episode = epNum
-                                        this.season = seasonNum
-                                    })
+
+                val defaultSeason = seriesJson.optJSONObject("defaultSeason")
+                if (defaultSeason != null) {
+                    val seasonNum = defaultSeason.optInt("seasonNumber", 1)
+                    val episodes = defaultSeason.optJSONArray("episodes")
+                    if (episodes != null) {
+                        for (j in 0 until episodes.length()) {
+                            val ep = episodes.optJSONObject(j) ?: continue
+                            val epNum = ep.optInt("episodeNumber", 0)
+                            if (epNum > 0) {
+                                val epName = ep.optString("title", "").ifBlank { "S${seasonNum}E$epNum" }
+                                episodeUrls.add(newEpisode(fixUrl("/series/$slug/season/$seasonNum/episode/$epNum")) {
+                                    this.name = epName
+                                    this.episode = epNum
+                                    this.season = seasonNum
+                                })
+                            }
+                        }
+                    }
+                } else {
+                    val seasons = seriesJson.optJSONArray("seasons")
+                    if (seasons != null) {
+                        for (i in 0 until seasons.length()) {
+                            val season = seasons.optJSONObject(i) ?: continue
+                            val seasonNum = season.optInt("seasonNumber", 1)
+                            val episodes = season.optJSONArray("episodes")
+                            if (episodes != null) {
+                                for (j in 0 until episodes.length()) {
+                                    val ep = episodes.optJSONObject(j) ?: continue
+                                    val epNum = ep.optInt("episodeNumber", 0)
+                                    if (epNum > 0) {
+                                        val epName = ep.optString("title", "").ifBlank { "S${seasonNum}E$epNum" }
+                                        episodeUrls.add(newEpisode(fixUrl("/series/$slug/season/$seasonNum/episode/$epNum")) {
+                                            this.name = epName
+                                            this.episode = epNum
+                                            this.season = seasonNum
+                                        })
+                                    }
                                 }
                             }
                         }
@@ -249,7 +270,8 @@ class Idlix : MainAPI() {
             else "api/series/$slug"
             val detailResp = app.get("$mainUrl/$apiPath")
             val detailJson = JSONObject(detailResp.text ?: return false)
-            contentId = detailJson.optString("id", "")
+            contentId = detailJson.optJSONObject("episode")?.optString("id", "")?.ifBlank { null }
+                ?: detailJson.optString("id", "")
             if (contentId.isBlank()) return false
         } catch (e: Exception) {
             return false
