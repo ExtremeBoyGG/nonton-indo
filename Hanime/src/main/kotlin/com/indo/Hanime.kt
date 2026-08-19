@@ -108,9 +108,9 @@ class Hanime : MainAPI() {
         val slug = url.substringAfterLast("/")
 
         val detail = try {
-            app.get("$apiBase/video?id=$slug", headers = headers).text
-                ?.let { tryParseJson<Map<String, Any?>>(it) }
-                ?.get("hentai_video") as? Map<*, *>
+            val text = app.get("$apiBase/video?id=$slug", headers = headers).text
+            val root = text?.let { tryParseJson<Map<String, Any?>>(it) }
+            root?.get("hentai_video") as? Map<*, *>
         } catch (_: Exception) { null }
 
         if (detail != null) return buildMovieResponse(detail, url)
@@ -126,7 +126,7 @@ class Hanime : MainAPI() {
         val plot = (video["description"]?.toString() ?: "").replace(Regex("<[^>]*>"), "").ifBlank { null }
         val poster = video["poster_url"]?.toString()
             ?: video["cover_url"]?.toString()?.replace("covers", "posters")?.replace("cv1", "pv1")
-        val tags = when (val t = video["hentai_tags"]) {
+        val tags = when (val t = video["hentai_tags"] ?: video["tags"]) {
             is List<*> -> if (t.firstOrNull() is String) {
                 t.mapNotNull { it?.toString() }
             } else {
@@ -154,10 +154,9 @@ class Hanime : MainAPI() {
         val slug = data.substringAfterLast("/")
 
         val hvId = try {
-            app.get("$apiBase/video?id=$slug", headers = headers).text
-                ?.let { tryParseJson<Map<String, Any?>>(it) }
-                ?.get("hentai_video") as? Map<*, *>
-                ?.get("id")?.toString()
+            val text = app.get("$apiBase/video?id=$slug", headers = headers).text
+            val root = text?.let { tryParseJson<Map<String, Any?>>(it) }
+            (root?.get("hentai_video") as? Map<*, *>)?.get("id")?.toString()
         } catch (_: Exception) { null }
 
         val resolvedId = hvId
@@ -193,9 +192,9 @@ class Hanime : MainAPI() {
                             ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
                                 ?.let { st -> st["url"]?.toString() } } }
             } else null
-        } else null ?: return false
+        } else null
 
-        if (hlsUrl.isBlank()) return false
+        if (hlsUrl.isNullOrBlank()) return false
 
         val links = M3u8Helper.generateM3u8(
             source = name,
