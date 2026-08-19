@@ -121,7 +121,7 @@ class Hanime : MainAPI() {
         throw ErrorLoadingException("Video not found")
     }
 
-    private fun buildMovieResponse(video: Map<*, *>, url: String): LoadResponse {
+    private suspend fun buildMovieResponse(video: Map<*, *>, url: String): LoadResponse {
         val title = video["name"]?.toString() ?: throw ErrorLoadingException("Title not found")
         val plot = (video["description"]?.toString() ?: "").replace(Regex("<[^>]*>"), "").ifBlank { null }
         val poster = video["poster_url"]?.toString()
