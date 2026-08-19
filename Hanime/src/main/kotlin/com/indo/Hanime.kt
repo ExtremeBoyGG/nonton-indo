@@ -6,7 +6,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.JsonAsString
-import java.net.URLEncoder
 
 class Hanime : MainAPI() {
     override var mainUrl = "https://hanime.tv"
@@ -16,8 +15,7 @@ class Hanime : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.NSFW)
 
-    private val apiBase = "https://cached.freeanimehentai.net/api/v8"
-    private val searchApi = "https://guest.freeanimehentai.net/api/v11/search_hvs"
+    private val apiBase = "https://guest.freeanimehentai.net/api/v11"
 
     private var searchCatalog: List<Map<String, Any?>>? = null
     private var searchCatalogTime = 0L
@@ -41,18 +39,28 @@ class Hanime : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) return newHomePageResponse(emptyList())
 
-        val json = app.get(request.data, headers = headers).text ?: return newHomePageResponse(emptyList())
-        val root = tryParseJson<Map<String, Any?>>(json) ?: return newHomePageResponse(emptyList())
+        val json = try {
+            app.get(request.data, headers = headers).text
+        } catch (_: Exception) { null }
 
-        val sections = root["sections"] as? List<Map<String, Any?>> ?: return newHomePageResponse(emptyList())
-        val videosMap = (root["hentai_videos"] as? List<Map<String, Any?>>)
-            ?.associateBy { it["id"] } ?: emptyMap()
+        val root = tryParseJson<Map<String, Any?>>(json ?: return newHomePageResponse(emptyList()))
+        if (root != null) {
+            val sections = root["sections"] as? List<Map<String, Any?>> ?: emptyList()
+            val videosMap = (root["hentai_videos"] as? List<Map<String, Any?>>)
+                ?.associateBy { it["id"] } ?: emptyMap()
+            val response = sections.mapNotNull { section ->
+                val title = section["title"]?.toString() ?: return@mapNotNull null
+                val ids = section["hentai_video_ids"] as? List<*> ?: return@mapNotNull null
+                HomePageList(title, ids.mapNotNull { id -> toSearchResponse(videosMap[id]) })
+            }
+            if (response.isNotEmpty()) return newHomePageResponse(response)
+        }
 
-        return newHomePageResponse(sections.mapNotNull { section ->
-            val title = section["title"]?.toString() ?: return@mapNotNull null
-            val ids = section["hentai_video_ids"] as? List<*> ?: return@mapNotNull null
-            HomePageList(title, ids.mapNotNull { id -> toSearchResponse(videosMap[id]) })
-        })
+        val catalog = getSearchCatalog()
+        if (catalog.isNullOrEmpty()) return newHomePageResponse(emptyList())
+
+        val items = catalog.asReversed().take(25).mapNotNull { toSearchResponse(it) }
+        return newHomePageResponse(listOf(HomePageList("Recent Uploads", items)))
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -87,7 +95,7 @@ class Hanime : MainAPI() {
         val now = System.currentTimeMillis()
         if (searchCatalog != null && now - searchCatalogTime < 3_600_000L) return searchCatalog
         searchCatalog = try {
-            app.get("$searchApi?search_text=${URLEncoder.encode("", "UTF-8")}", headers = headers).text
+            app.get("$apiBase/search_hvs", headers = headers).text
                 ?.let { tryParseJson<List<Map<String, Any?>>>(it) }
         } catch (_: Exception) {
             null
@@ -99,19 +107,33 @@ class Hanime : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val slug = url.substringAfterLast("/")
 
-        val json = app.get("$apiBase/video?id=$slug", headers = headers).text
-            ?: throw ErrorLoadingException("No response")
+        val detail = try {
+            app.get("$apiBase/video?id=$slug", headers = headers).text
+                ?.let { tryParseJson<Map<String, Any?>>(it) }
+                ?.get("hentai_video") as? Map<*, *>
+        } catch (_: Exception) { null }
 
-        val root = tryParseJson<Map<String, Any?>>(json)
-            ?: throw ErrorLoadingException("Invalid response")
+        if (detail != null) return buildMovieResponse(detail, url)
 
-        val video = root["hentai_video"] as? Map<*, *>
-            ?: throw ErrorLoadingException("Missing video")
+        val fromCatalog = getSearchCatalog()?.firstOrNull { it["slug"]?.toString() == slug }
+        if (fromCatalog != null) return buildMovieResponse(fromCatalog, url)
 
+        throw ErrorLoadingException("Video not found")
+    }
+
+    private fun buildMovieResponse(video: Map<*, *>, url: String): LoadResponse {
         val title = video["name"]?.toString() ?: throw ErrorLoadingException("Title not found")
         val plot = (video["description"]?.toString() ?: "").replace(Regex("<[^>]*>"), "").ifBlank { null }
-        val poster = video["poster_url"]?.toString() ?: video["cover_url"]?.toString()?.replace("covers", "posters")?.replace("cv1", "pv1")
-        val tags = (video["hentai_tags"] as? List<Map<*, *>>)?.mapNotNull { it["text"]?.toString() }.orEmpty()
+        val poster = video["poster_url"]?.toString()
+            ?: video["cover_url"]?.toString()?.replace("covers", "posters")?.replace("cv1", "pv1")
+        val tags = when (val t = video["hentai_tags"]) {
+            is List<*> -> if (t.firstOrNull() is String) {
+                t.mapNotNull { it?.toString() }
+            } else {
+                t.mapNotNull { (it as? Map<*, *>)?.get("text")?.toString() }
+            }
+            else -> emptyList()
+        }
         val year = video["released_at"]?.toString()?.take(4)?.toIntOrNull()
 
         return newMovieLoadResponse(title, url, TvType.NSFW, url) {
@@ -131,12 +153,20 @@ class Hanime : MainAPI() {
     ): Boolean {
         val slug = data.substringAfterLast("/")
 
-        val detailJson = app.get("$apiBase/video?id=$slug", headers = headers).text ?: return false
-        val detailRoot = tryParseJson<Map<String, Any?>>(detailJson) ?: return false
-        val video = detailRoot["hentai_video"] as? Map<*, *> ?: return false
-        val hvId = video["id"]?.toString() ?: return false
+        val hvId = try {
+            app.get("$apiBase/video?id=$slug", headers = headers).text
+                ?.let { tryParseJson<Map<String, Any?>>(it) }
+                ?.get("hentai_video") as? Map<*, *>
+                ?.get("id")?.toString()
+        } catch (_: Exception) { null }
 
-        app.post("$apiBase/hentai_videos/$slug/play", headers = headers, json = JsonAsString("{}"))
+        val resolvedId = hvId
+            ?: getSearchCatalog()?.firstOrNull { it["slug"]?.toString() == slug }?.get("id")?.toString()
+            ?: return false
+
+        try {
+            app.post("$apiBase/hentai_videos/$slug/play", headers = headers, json = JsonAsString("{}"))
+        } catch (_: Exception) { }
 
         val manifestHeaders = mapOf(
             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
@@ -151,7 +181,7 @@ class Hanime : MainAPI() {
         )
 
         val manifestJson = try {
-            app.get("$apiBase/guest/videos/$hvId/manifest", headers = manifestHeaders).text
+            app.get("$apiBase/guest/videos/$resolvedId/manifest", headers = manifestHeaders).text
         } catch (_: Exception) { null }
 
         val hlsUrl = if (!manifestJson.isNullOrBlank()) {
@@ -163,12 +193,7 @@ class Hanime : MainAPI() {
                             ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
                                 ?.let { st -> st["url"]?.toString() } } }
             } else null
-        } else {
-            (detailRoot["videos_manifest"] as? Map<*, *>)
-                ?.let { m -> (m["servers"] as? List<Map<*, *>>)?.firstOrNull()
-                    ?.let { s -> (s["streams"] as? List<Map<*, *>>)?.firstOrNull()
-                        ?.let { st -> st["url"]?.toString() } } }
-        } ?: return false
+        } else null ?: return false
 
         if (hlsUrl.isBlank()) return false
 
@@ -193,8 +218,10 @@ class Hanime : MainAPI() {
         val v = video ?: return null
         val name = v["name"]?.toString()?.ifBlank { null } ?: return null
         val slug = v["slug"]?.toString()?.ifBlank { null } ?: return null
+        val poster = v["poster_url"]?.toString()?.ifBlank { null }
+            ?: "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
         return newMovieSearchResponse(name, "$mainUrl/videos/hentai/$slug", TvType.NSFW) {
-            this.posterUrl = "https://hanime-cdn.com/images/posters/$slug-pv1.webp"
+            this.posterUrl = poster
             this.posterHeaders = mapOf("Referer" to "$mainUrl/")
         }
     }
