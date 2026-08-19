@@ -47,12 +47,9 @@ class Nekopoi : MainAPI() {
             val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
             val style = card.selectFirst("div.nk-thumb-crop")?.attr("style") ?: ""
             val poster = Regex("url\\('([^']+)'").find(style)?.groupValues?.getOrNull(1)
-            val epNum = Regex("Episode\\s*(\\d+)", RegexOption.IGNORE_CASE).find(title)
-                ?.groupValues?.getOrNull(1)?.toIntOrNull()
             val seriesHref = card.selectFirst("div.nk-post-meta span a[href*=/hentai/]")?.attr("href")
             newTvSeriesSearchResponse(title, seriesHref ?: href, TvType.NSFW) {
                 this.posterUrl = poster
-                addSub(epNum)
             }
         }.let { items ->
             if (items.isNotEmpty()) sections.add(HomePageList("Episode Terbaru", items))
@@ -134,7 +131,7 @@ class Nekopoi : MainAPI() {
         return candidates.distinct().map { "$mainUrl/$it/" }
     }
 
-    private fun buildSeriesResponse(url: String, doc: Document, episodes: List<Episode>): LoadResponse {
+    private suspend fun buildSeriesResponse(url: String, doc: Document, episodes: List<Episode>): LoadResponse {
         val title = doc.selectFirst("title")?.text()?.replace(" - NekoPoi", "")?.trim()
             ?: doc.selectFirst("div.nk-series-synopsis b")?.text()?.trim()
             ?: doc.selectFirst("h1")?.text()?.trim()
@@ -157,7 +154,7 @@ class Nekopoi : MainAPI() {
         }
     }
 
-    private fun buildMovieResponse(url: String, doc: Document): LoadResponse {
+    private suspend fun buildMovieResponse(url: String, doc: Document): LoadResponse {
         val title = doc.selectFirst("title")?.text()?.replace(" - NekoPoi", "")?.trim()
             ?: doc.selectFirst("h1")?.text()?.trim()
             ?: throw ErrorLoadingException("Title not found")
