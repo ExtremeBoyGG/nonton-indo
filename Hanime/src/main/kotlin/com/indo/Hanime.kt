@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.JsonAsString
+import java.net.URLEncoder
 
 class Hanime : MainAPI() {
     override var mainUrl = "https://hanime.tv"
@@ -16,6 +17,10 @@ class Hanime : MainAPI() {
     override val supportedTypes = setOf(TvType.NSFW)
 
     private val apiBase = "https://cached.freeanimehentai.net/api/v8"
+    private val searchApi = "https://guest.freeanimehentai.net/api/v11/search_hvs"
+
+    private var searchCatalog: List<Map<String, Any?>>? = null
+    private var searchCatalogTime = 0L
 
     private val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
@@ -53,6 +58,20 @@ class Hanime : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return listOf()
 
+        val catalog = getSearchCatalog()
+        if (!catalog.isNullOrEmpty()) {
+            val q = query.lowercase()
+            return catalog.asSequence()
+                .filter { item ->
+                    item["name"]?.toString()?.lowercase()?.contains(q) == true ||
+                        item["search_titles"]?.toString()?.lowercase()?.contains(q) == true ||
+                        item["slug"]?.toString()?.lowercase()?.contains(q) == true
+                }
+                .mapNotNull { toSearchResponse(it) }
+                .take(50)
+                .toList()
+        }
+
         val doc = app.get("$mainUrl/browse?search=$query", headers = headers).document
         return doc.select("div.hvc.item.card a[href^=/videos/hentai/]").mapNotNull { a ->
             val slug = a.attr("href").removePrefix("/videos/hentai/").ifBlank { null } ?: return@mapNotNull null
@@ -62,6 +81,19 @@ class Hanime : MainAPI() {
                 this.posterHeaders = mapOf("Referer" to "$mainUrl/")
             }
         }.distinctBy { it.url }
+    }
+
+    private suspend fun getSearchCatalog(): List<Map<String, Any?>>? {
+        val now = System.currentTimeMillis()
+        if (searchCatalog != null && now - searchCatalogTime < 3_600_000L) return searchCatalog
+        searchCatalog = try {
+            app.get("$searchApi?search_text=${URLEncoder.encode("", "UTF-8")}", headers = headers).text
+                ?.let { tryParseJson<List<Map<String, Any?>>>(it) }
+        } catch (_: Exception) {
+            null
+        }
+        searchCatalogTime = now
+        return searchCatalog
     }
 
     override suspend fun load(url: String): LoadResponse {
