@@ -8,12 +8,14 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class Kuramanime : MainAPI() {
-    override var mainUrl = "https://v17.kuramanime.ink"
+    override var mainUrl = "https://v20.kuramanime.ing"
     override var name = "Kuramanime"
     override val hasMainPage = true
     override var lang = "id"
-    override val hasDownloadSupport = false
+    override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
+
+    private val authValue = "kJuHHkaqcBFXiGMHQf6bJw8YAyDcwGD8Ur"
 
     // Each section has its own paginated URL
     override val mainPage = mainPageOf(
@@ -147,79 +149,100 @@ class Kuramanime : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        var found = false
         val doc = app.get(data).document
+        val html = doc.outerHtml()
 
-        doc.getElementsByTag("iframe").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-            val fullSrc = if (src.startsWith("//")) "https:$src" else src
-            loadExtractor(fullSrc, data, subtitleCallback, callback)
-        }
+        try {
+            val csrf = doc.selectFirst("meta[name=csrf-token]")?.attr("content")
+            val kk = Regex("data-kk=\"([^\"]+)\"").find(html)?.groupValues?.getOrNull(1)
 
-        val postUrl = "$data?Ub3BzhijicHXZdv=sSpyhnlQpR&C2XAPerzX1BM7V9=kuramadrive&page=1"
-        val postDoc = app.post(
-            postUrl,
-            headers = mapOf(
-                "Accept" to "*/*",
-                "X-Requested-With" to "XMLHttpRequest",
-                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8"
-            ),
-            data = mapOf("authorization" to "qDBDmoKgQIdP6wmFGUCDo3vuVg9FBfV98")
-        ).document
+            if (!csrf.isNullOrBlank() && !kk.isNullOrBlank()) {
+                val cfg = app.get("$mainUrl/assets/js/$kk.js").text
 
-        // The POST response might directly be the content of animeDownloadLink or wrap it.
-        // Let's check both the root and div#animeDownloadLink
-        val downloadSection = postDoc.selectFirst("div#animeDownloadLink") ?: postDoc.body()
-        if (downloadSection != null) {
-            var currentQuality = Qualities.Unknown.value
+                fun cfgValue(key: String): String =
+                    Regex("$key:\\s*'([^']+)'").find(cfg)?.groupValues?.getOrNull(1) ?: ""
 
-            downloadSection.children().forEach { element ->
-                if (element.tagName() == "h6") {
-                    val currentQualityText = element.text()
-                    currentQuality = when {
-                        currentQualityText.contains("1080") -> Qualities.P1080.value
-                        currentQualityText.contains("720") -> Qualities.P720.value
-                        currentQualityText.contains("480") -> Qualities.P480.value
-                        currentQualityText.contains("360") -> Qualities.P360.value
-                        else -> Qualities.Unknown.value
-                    }
-                } else if (element.tagName() == "a") {
-                    val href = element.attr("href").ifBlank { null } ?: return@forEach
-                    val serverName = element.text().trim()
+                val authParam = cfgValue("MIX_AUTH_ROUTE_PARAM")
+                val pageTokenKey = cfgValue("MIX_PAGE_TOKEN_KEY")
+                val serverKey = cfgValue("MIX_STREAM_SERVER_KEY")
+                val fuckId = "${cfgValue("MIX_AUTH_KEY")}:${cfgValue("MIX_AUTH_TOKEN")}"
 
-                    if (href.contains("pixeldrain.com")) {
-                        val pdId = Regex("pixeldrain\\.com/d/(\\w+)").find(href)?.groupValues?.getOrNull(1)
-                            ?: Regex("pixeldrain\\.com/u/(\\w+)").find(href)?.groupValues?.getOrNull(1)
-                        if (pdId != null) {
-                            callback(newExtractorLink("PixelDrain", "PixelDrain", "https://pixeldrain.com/api/file/$pdId") {
-                                this.quality = currentQuality
-                                this.referer = data
+                if (authParam.isNotBlank() && pageTokenKey.isNotBlank() && serverKey.isNotBlank()) {
+                    val requestId = (1..6).map { ('a'..'z').random() }.joinToString("")
+                    val token = app.get(
+                        "$mainUrl/assets/$authParam",
+                        headers = mapOf(
+                            "X-Fuck-ID" to fuckId,
+                            "X-Request-ID" to requestId,
+                            "X-Request-Index" to "0"
+                        )
+                    ).text.trim()
+
+                    if (token.isNotBlank()) {
+                        val postDoc = app.post(
+                            "$data?$pageTokenKey=$token&$serverKey=kuramadrive&page=1",
+                            headers = mapOf(
+                                "Accept" to "text/html, */*; q=0.01",
+                                "X-Requested-With" to "XMLHttpRequest",
+                                "X-CSRF-TOKEN" to csrf,
+                                "Origin" to mainUrl,
+                                "Referer" to data
+                            ),
+                            data = mapOf("authorization" to authValue)
+                        ).document
+
+                        postDoc.select("video#player source[src]").forEach { source ->
+                            val src = source.attr("src").ifBlank { null } ?: return@forEach
+                            val q = source.attr("size").toIntOrNull()
+                            callback(newExtractorLink("KuramaDrive", "KuramaDrive ${q ?: ""}p".trim(), src) {
+                                this.quality = when (q) {
+                                    1080 -> Qualities.P1080.value
+                                    720 -> Qualities.P720.value
+                                    480 -> Qualities.P480.value
+                                    360 -> Qualities.P360.value
+                                    else -> Qualities.Unknown.value
+                                }
+                                this.referer = mainUrl
                             })
+                            found = true
                         }
-                    } else if (serverName.contains("kDrive", ignoreCase = true) || serverName.contains("kTurbo", ignoreCase = true)) {
-                        try {
-                            val kdriveDoc = app.get(href).document
-                            val filename = kdriveDoc.selectFirst("h2.drive-file-label")?.text()?.trim()
-                            val dataDomain = kdriveDoc.selectFirst("button.check-status")?.attr("data-domain")
 
-                            if (dataDomain != null && filename != null) {
-                                val path = java.net.URI(href).path
-                                val encodedFilename = java.net.URLEncoder.encode(filename, "UTF-8").replace("+", "%20")
-                                val streamUrl = "${dataDomain.trimEnd('/')}$path/$encodedFilename"
-
-                                callback.invoke(
-                                    newExtractorLink("KuramaDrive", serverName, streamUrl) {
-                                        this.referer = ""
-                                        this.quality = currentQuality
+                        var currentQuality = Qualities.Unknown.value
+                        postDoc.selectFirst("#animeDownloadLink")?.children()?.forEach { element ->
+                            if (element.tagName() == "h6") {
+                                val t = element.text()
+                                currentQuality = when {
+                                    t.contains("1080") -> Qualities.P1080.value
+                                    t.contains("720") -> Qualities.P720.value
+                                    t.contains("480") -> Qualities.P480.value
+                                    t.contains("360") -> Qualities.P360.value
+                                    else -> Qualities.Unknown.value
+                                }
+                            } else {
+                                element.select("a[href]").forEach { a ->
+                                    val href = a.attr("href").ifBlank { null } ?: return@forEach
+                                    val pdId = Regex("pixeldrain\\.com/[du]/(\\w+)").find(href)?.groupValues?.getOrNull(1)
+                                    if (pdId != null) {
+                                        callback(newExtractorLink("PixelDrain", "PixelDrain", "https://pixeldrain.com/api/file/$pdId") {
+                                            this.quality = currentQuality
+                                            this.referer = mainUrl
+                                        })
+                                        found = true
                                     }
-                                )
+                                }
                             }
-                        } catch (e: Exception) {
-                            // Ignore fetch errors
                         }
-                    } else {
-                        loadExtractor(href, data, subtitleCallback, callback)
                     }
                 }
+            }
+        } catch (_: Exception) { }
+
+        if (!found) {
+            doc.getElementsByTag("iframe").forEach { iframe ->
+                val src = iframe.attr("src").ifBlank { null } ?: return@forEach
+                val fullSrc = if (src.startsWith("//")) "https:$src" else src
+                loadExtractor(fullSrc, data, subtitleCallback, callback)
             }
         }
 

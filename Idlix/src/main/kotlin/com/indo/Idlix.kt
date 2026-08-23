@@ -16,6 +16,13 @@ class Idlix : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
+    private val cfKiller = CloudflareKiller()
+
+    private val apiHeaders = mapOf(
+        "Accept" to "application/json",
+        "Referer" to "$mainUrl/"
+    )
+
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Home"
     )
@@ -37,7 +44,7 @@ class Idlix : MainAPI() {
     }
 
     private suspend fun getApiSection(name: String, page: Int, apiPath: String): HomePageList? {
-        val resp = app.get("$mainUrl/$apiPath?page=$page&limit=24")
+        val resp = app.get("$mainUrl/$apiPath?page=$page&limit=24", headers = apiHeaders, interceptor = cfKiller)
         val text = resp.text ?: return null
         val data = try { JSONObject(text).optJSONArray("data") } catch (e: Exception) { return null }
         if (data == null) return null
@@ -70,7 +77,7 @@ class Idlix : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val resp = app.get("$mainUrl/api/search?q=$query")
+        val resp = app.get("$mainUrl/api/search?q=$query", headers = apiHeaders, interceptor = cfKiller)
         val text = resp.text ?: return emptyList()
         val data = try { JSONObject(text).optJSONArray("results") } catch (e: Exception) { return emptyList() }
         if (data == null) return emptyList()
@@ -102,7 +109,7 @@ class Idlix : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val resp = app.get(url)
+        val resp = app.get(url, interceptor = cfKiller)
         val raw = resp.text ?: throw ErrorLoadingException("No response")
         val html = raw.replace("\\\"", "\"")
 
@@ -132,7 +139,7 @@ class Idlix : MainAPI() {
             val slug = url.substringAfter("/series/").substringBefore("/").substringBefore("?")
             val episodeUrls = mutableListOf<Episode>()
             try {
-                val seriesResp = app.get("$mainUrl/api/series/$slug")
+                val seriesResp = app.get("$mainUrl/api/series/$slug", headers = apiHeaders, interceptor = cfKiller)
                 val seriesJson = JSONObject(seriesResp.text ?: "")
 
                 val defaultSeason = seriesJson.optJSONObject("defaultSeason")
@@ -209,7 +216,7 @@ class Idlix : MainAPI() {
     ): Boolean {
         if (tryLoadFromApi(data, subtitleCallback, callback)) return true
 
-        val resp = app.get(data)
+        val resp = app.get(data, interceptor = cfKiller)
         val raw = resp.text ?: return true
         val html = raw.replace("\\\"", "\"")
 
@@ -269,7 +276,7 @@ class Idlix : MainAPI() {
             val apiPath = if (contentType == "movie") "api/movies/$slug"
             else if (extra.containsKey("season")) "api/series/$slug/season/${extra["season"]}/episode/${extra["episode"]}"
             else "api/series/$slug"
-            val detailResp = app.get("$mainUrl/$apiPath")
+            val detailResp = app.get("$mainUrl/$apiPath", headers = apiHeaders, interceptor = cfKiller)
             val detailJson = JSONObject(detailResp.text ?: return false)
             contentId = detailJson.optJSONObject("episode")?.optString("id", "")?.ifBlank { null }
                 ?: detailJson.optString("id", "")
@@ -282,38 +289,34 @@ class Idlix : MainAPI() {
         var subtitles: List<Pair<String, String>> = emptyList()
         try {
             val playInfoType = if (extra.containsKey("season")) "episode" else contentType
-            val playInfoResp = app.get("$mainUrl/api/watch/play-info/$playInfoType/$contentId")
+            val playInfoResp = app.get(
+                "$mainUrl/api/watch/play-info/$playInfoType/$contentId",
+                headers = apiHeaders,
+                interceptor = cfKiller
+            )
             val playInfo = JSONObject(playInfoResp.text ?: return false)
             val gateToken = playInfo.optString("gateToken", "")
             if (gateToken.isBlank()) return false
 
-            val claimResp = app.post(
-                "$mainUrl/api/watch/session/claim",
-                json = JsonAsString("""{"gateToken":"$gateToken"}""")
-            )
-            val claimText = claimResp.text ?: return false
-            val claimJson = JSONObject(claimText)
+            val kind = playInfo.optString("kind", "")
+            if (kind == "gate") {
+                val unlockAt = playInfo.optLong("unlockAt", 0L)
+                val serverNow = playInfo.optLong("serverNow", 0L)
+                val waitMs = if (unlockAt > 0 && serverNow > 0) unlockAt - serverNow else 15000L
+                if (waitMs > 0) delay(waitMs + 2000)
+            }
 
-            var redeemUrl: String
-            var claim: String
-            var initialMaster: String
+            var claimJson = postClaim(gateToken)
+
             if (claimJson.optString("kind") == "pending") {
                 val remainingMs = claimJson.optLong("remainingMs", 0)
                 if (remainingMs > 0) delay(remainingMs + 2000)
-                val retryResp = app.post(
-                    "$mainUrl/api/watch/session/claim",
-                    json = JsonAsString("""{"gateToken":"$gateToken"}""")
-                )
-                val retryText = retryResp.text ?: return false
-                val retryJson = JSONObject(retryText)
-                redeemUrl = retryJson.optString("redeemUrl", "")
-                claim = retryJson.optString("claim", "")
-                initialMaster = retryJson.optString("initialMasterUrl", "")
-            } else {
-                redeemUrl = claimJson.optString("redeemUrl", "")
-                claim = claimJson.optString("claim", "")
-                initialMaster = claimJson.optString("initialMasterUrl", "")
+                claimJson = postClaim(gateToken)
             }
+
+            val redeemUrl = claimJson.optString("redeemUrl", "")
+            val claim = claimJson.optString("claim", "")
+            val initialMaster = claimJson.optString("initialMasterUrl", "")
 
             if (redeemUrl.isNotBlank() && claim.isNotBlank()) {
                 try {
@@ -356,6 +359,19 @@ class Idlix : MainAPI() {
         }
 
         return false
+    }
+
+    private suspend fun postClaim(gateToken: String): JSONObject {
+        val claimResp = app.post(
+            "$mainUrl/api/watch/session/claim",
+            headers = apiHeaders + mapOf(
+                "Origin" to mainUrl,
+                "Content-Type" to "application/json"
+            ),
+            json = JsonAsString("""{"gateToken":"$gateToken"}"""),
+            interceptor = cfKiller
+        )
+        return JSONObject(claimResp.text ?: "{}")
     }
 
     private fun parseQuality(q: String): Int {
