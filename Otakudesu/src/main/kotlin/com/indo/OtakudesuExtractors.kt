@@ -77,7 +77,7 @@ class Filedon : ExtractorApi() {
             newExtractorLink(name, name, streamUrl) {
                 this.referer = embedUrl
                 this.quality = quality
-                this.type = if (hls != null) ExtractorLinkType.M3U8 else ExtractorLinkType.MP4
+                this.type = if (hls != null) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
             }
         )
     }
