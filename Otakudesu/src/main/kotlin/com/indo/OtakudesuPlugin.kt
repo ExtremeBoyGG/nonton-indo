@@ -9,5 +9,6 @@ class OtakudesuPlugin : Plugin() {
     override fun load(context: Context) {
         registerMainAPI(Otakudesu())
         registerExtractorAPI(KrakenFiles())
+        registerExtractorAPI(Filedon())
     }
 }
