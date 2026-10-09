@@ -199,6 +199,21 @@ class Donghub : MainAPI() {
         }
     }
 
+    private suspend fun extractStream(
+        url: String,
+        ref: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val dmId = Regex("""(?:dailymotion\.com/(?:video/|player/[^?]+\.html\?video=)|dai\.ly/|geo\.dailymotion\.com/player/[^?]+\.html\?video=)([a-zA-Z0-9]+)""").find(url)?.groupValues?.getOrNull(1)
+        if (dmId != null) {
+            loadExtractor("https://www.dailymotion.com/video/$dmId", ref, subtitleCallback, callback)
+            return
+        }
+
+        loadExtractor(url, ref, subtitleCallback, callback)
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -209,7 +224,7 @@ class Donghub : MainAPI() {
 
         doc.select("#pembed iframe[src]").forEach { iframe ->
             val src = iframe.attr("src").ifBlank { return@forEach }
-            loadExtractor(src, data, subtitleCallback, callback)
+            extractStream(src, data, subtitleCallback, callback)
         }
 
         doc.select("select.mirror option").forEach { option ->
@@ -219,7 +234,7 @@ class Donghub : MainAPI() {
                 val decoded = String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT))
                 val iframeSrc = Regex("""iframe\s+[^>]*src\s*=\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(decoded)?.groupValues?.getOrNull(1)
                 if (iframeSrc != null) {
-                    loadExtractor(iframeSrc, data, subtitleCallback, callback)
+                    extractStream(iframeSrc, data, subtitleCallback, callback)
                 }
             } catch (_: Exception) { }
         }

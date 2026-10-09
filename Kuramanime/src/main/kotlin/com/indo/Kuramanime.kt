@@ -198,7 +198,7 @@ class Kuramanime : MainAPI() {
                             data = mapOf("authorization" to authValue)
                         ).document
 
-                        postDoc.select("video#player source[src]").forEach { source ->
+                        postDoc.select("video source[src], source[src]").forEach { source ->
                             val src = source.attr("src").ifBlank { null } ?: return@forEach
                             val q = source.attr("size").toIntOrNull()
                             callback(newExtractorLink("KuramaDrive", "KuramaDrive ${q ?: ""}p".trim(), src) {
@@ -209,7 +209,11 @@ class Kuramanime : MainAPI() {
                                     360 -> Qualities.P360.value
                                     else -> Qualities.Unknown.value
                                 }
-                                this.referer = mainUrl
+                                this.referer = "$mainUrl/"
+                                this.headers = mapOf(
+                                    "Referer" to "$mainUrl/",
+                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                )
                             })
                             found = true
                         }
@@ -232,7 +236,7 @@ class Kuramanime : MainAPI() {
                                     if (pdId != null) {
                                         callback(newExtractorLink("PixelDrain", "PixelDrain", "https://pixeldrain.com/api/file/$pdId") {
                                             this.quality = currentQuality
-                                            this.referer = mainUrl
+                                            this.referer = "https://pixeldrain.com/"
                                         })
                                         found = true
                                     }

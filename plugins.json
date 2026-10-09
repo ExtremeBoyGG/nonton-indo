@@ -176,7 +176,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Anime", "AnimeMovie"],
-        "version": 1,
+        "version": 3,
         "internalName": "Donghub",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Donghub.cs3",
         "name": "Donghub"
@@ -233,7 +233,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["AnimeMovie", "OVA", "Anime"],
-        "version": 3,
+        "version": 4,
         "internalName": "Kuramanime",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Kuramanime.cs3",
         "name": "Kuramanime"
