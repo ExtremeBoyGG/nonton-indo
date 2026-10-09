@@ -6,8 +6,11 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.nicehttp.JsonAsString
 import org.json.JSONObject
 import org.jsoup.nodes.Element
+
+
 
 
 class LK21 : MainAPI() {
@@ -116,6 +119,7 @@ class LK21 : MainAPI() {
 
             val enc = Regex("""const\s+datas\s*=\s*"([^"]*)"""").find(areq)?.groupValues?.getOrNull(1) ?: return false
 
+            val jsonPayload = JSONObject().put("text", enc).toString()
             val decRes = app.post(
                 "https://enc-dec.app/api/dec-abyss",
                 headers = mapOf(
@@ -124,14 +128,14 @@ class LK21 : MainAPI() {
                     "Origin" to "https://playhydrax.com",
                     "Referer" to "https://playhydrax.com/"
                 ),
-                data = mapOf("text" to enc)
+                json = JsonAsString(jsonPayload)
             ).text
 
             val decJson = JSONObject(decRes)
             val result = decJson.optJSONObject("result") ?: return false
             val sources = result.optJSONArray("sources") ?: return false
 
-            var found = false
+            val parsedSources = mutableListOf<Pair<ExtractorLink, Int>>()
             for (i in 0 until sources.length()) {
                 val srcObj = sources.optJSONObject(i) ?: continue
                 if (!srcObj.optBoolean("status", true)) continue
@@ -145,17 +149,25 @@ class LK21 : MainAPI() {
                     type.contains("360") -> Qualities.P360.value
                     else -> Qualities.Unknown.value
                 }
-                callback(
-                    newExtractorLink(
-                        "Hydrax",
-                        "Hydrax $type",
-                        srcUrl,
-                        type = ExtractorLinkType.VIDEO
-                    ) {
-                        this.quality = q
-                        this.referer = "https://abyssplayer.com/"
-                    }
-                )
+                val link = newExtractorLink(
+                    "Hydrax",
+                    "Hydrax $type",
+                    srcUrl,
+                    type = ExtractorLinkType.VIDEO
+                ) {
+                    this.quality = q
+                    this.referer = "https://abyssplayer.com/"
+                    this.headers = mapOf(
+                        "Referer" to "https://abyssplayer.com/",
+                        "Origin" to "https://abyssplayer.com"
+                    )
+                }
+                parsedSources.add(Pair(link, q))
+            }
+
+            var found = false
+            parsedSources.sortedByDescending { it.second }.forEach { (link, _) ->
+                callback(link)
                 found = true
             }
             return found
@@ -177,9 +189,10 @@ class LK21 : MainAPI() {
             playerElements.mapNotNull { a ->
                 val playerUrl = a.attr("data-url").ifBlank { a.attr("href") }
                 if (playerUrl.isNotBlank()) {
-                    val name = a.text().trim().ifBlank { "Server" }
+                    val name = a.attr("data-server").ifBlank { a.text().trim() }.ifBlank { "Server" }
                     Pair(name, playerUrl)
                 } else null
+
             }
         } else {
             val iframeSrc = doc.selectFirst("iframe#main-player")?.attr("src")

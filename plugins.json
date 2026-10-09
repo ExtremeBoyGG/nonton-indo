@@ -204,8 +204,9 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Movie"],
-        "version": 2,
+        "version": 3,
         "internalName": "LK21",
+
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/LK21.cs3",
         "name": "LK21"
     },
