@@ -8,7 +8,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Anime", "AnimeMovie", "OVA"],
-        "version": 1,
+        "version": 2,
         "internalName": "AnimeIndo",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/AnimeIndo.cs3",
         "name": "AnimeIndo"
@@ -64,7 +64,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Anime", "AnimeMovie", "OVA"],
-        "version": 1,
+        "version": 2,
         "internalName": "Animasu",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Animasu.cs3",
         "name": "Animasu"
@@ -78,7 +78,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Movie", "TvSeries"],
-        "version": 1,
+        "version": 3,
         "internalName": "Pahe",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Pahe.cs3",
         "name": "Pahe"
@@ -223,5 +223,33 @@
         "internalName": "Anichin",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Anichin.cs3",
         "name": "Anichin"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://v20.kuramanime.ing&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["AnimeMovie", "OVA", "Anime"],
+        "version": 3,
+        "internalName": "Kuramanime",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Kuramanime.cs3",
+        "name": "Kuramanime"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://kuronime.sbs&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["AnimeMovie", "OVA", "Anime"],
+        "version": 2,
+        "internalName": "Kuronime",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Kuronime.cs3",
+        "name": "Kuronime"
     }
 ]

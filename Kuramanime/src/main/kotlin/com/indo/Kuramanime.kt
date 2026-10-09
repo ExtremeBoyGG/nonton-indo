@@ -59,14 +59,14 @@ class Kuramanime : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/anime?search=$query&order_by=text"
+        val url = "$mainUrl/anime?search=$query"
         val doc = app.get(url).document
 
         return doc.select("div.product__item").mapNotNull { item ->
             val a = item.selectFirst("a[href*=/anime/]") ?: return@mapNotNull null
             val href = fixUrl(a.attr("href").ifBlank { null } ?: return@mapNotNull null)
 
-            val title = item.selectFirst("h5")?.text()?.trim()?.ifBlank { null }
+            val title = item.selectFirst(".product__item__text h5 a, h5 a, h5")?.text()?.trim()?.ifBlank { null }
                 ?: item.selectFirst("a:last-of-type")?.text()?.trim()?.ifBlank { null }
                 ?: return@mapNotNull null
 
@@ -76,7 +76,13 @@ class Kuramanime : MainAPI() {
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = poster
             }
-        }.distinctBy { it.url }
+        }.distinctBy { it.url }.ifEmpty {
+            doc.select("div.anime__text a.anime__list__link, div.anime__text a[href*=/anime/]").mapNotNull { a ->
+                val href = fixUrl(a.attr("href").ifBlank { null } ?: return@mapNotNull null)
+                val title = a.ownText().trim().ifBlank { a.text().trim() }.ifBlank { null } ?: return@mapNotNull null
+                newAnimeSearchResponse(title, href, TvType.Anime)
+            }.distinctBy { it.url }
+        }
     }
 
     override suspend fun load(url: String): LoadResponse {

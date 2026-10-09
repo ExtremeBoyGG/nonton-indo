@@ -56,9 +56,12 @@ class Animasu : MainAPI() {
         val doc = app.get("$mainUrl/?s=$query").document
         return doc.select("article, div.item").mapNotNull { el ->
             if (el.selectFirst("img") == null) return@mapNotNull null
-            val a = el.selectFirst("h2 a, h3 a, a[rel=bookmark]") ?: return@mapNotNull null
+            val a = el.selectFirst("h2 a, h3 a, a.item-title, a[rel=bookmark]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
+            val title = el.selectFirst("h2, h3, .title, .entry-title")?.text()?.trim()?.ifBlank { null }
+                ?: a.attr("title").removePrefix("Permalink ke:").removePrefix("Permalink ke: ").trim().ifBlank { null }
+                ?: a.text().trim().ifBlank { null }
+                ?: return@mapNotNull null
             val poster = el.selectFirst("img")?.let { img ->
                 img.attr("data-src").ifBlank { null } ?: img.attr("src").takeUnless { it.startsWith("data:") }
             }

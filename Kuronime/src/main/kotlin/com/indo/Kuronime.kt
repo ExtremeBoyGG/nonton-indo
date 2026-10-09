@@ -68,21 +68,23 @@ class Kuronime : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/?s=$query").document
-        return document.select("article.bsu").mapNotNull { article ->
-            val bsux = article.selectFirst("div.bsux") ?: return@mapNotNull null
+        return document.select("article.bs, article.bsu").mapNotNull { article ->
+            val bsux = article.selectFirst("div.bsx, div.bsux") ?: article
             val a = bsux.selectFirst("a[href]") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
 
-            val title = bsux.selectFirst("div.bsuxtt h2")?.text()?.trim()
+            val title = a.attr("title").trim().ifBlank { null }
+                ?: bsux.selectFirst("div.bsuxtt h2, div.tt h2, h2")?.text()?.trim()?.ifBlank { null }
                 ?: return@mapNotNull null
 
-            val poster = a.selectFirst("div.limit img[itemprop=image]")?.attr("src")?.ifBlank { null }
+            val poster = a.selectFirst("img[itemprop=image]")?.let { it.attr("src").ifBlank { it.attr("data-src") } }
+                ?: a.selectFirst("img:not([src*=controls-play])")?.let { it.attr("src").ifBlank { it.attr("data-src") } }
                 ?: a.selectFirst("div.limit img")?.attr("src")?.ifBlank { null }
 
             val epText = a.selectFirst("div.bt div.ep")?.text()?.trim() ?: ""
             val epNum = Regex("(\\d+)").find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
 
-            val animeUrl = episodeToAnimeUrl(href)
+            val animeUrl = if (href.contains("/anime/")) href else episodeToAnimeUrl(href)
 
             newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
                 this.posterUrl = poster

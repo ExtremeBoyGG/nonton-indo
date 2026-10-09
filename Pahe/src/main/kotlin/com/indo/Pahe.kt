@@ -48,14 +48,16 @@ class Pahe : MainAPI() {
     }
 
     private fun listNodes(doc: org.jsoup.nodes.Document): List<Element> {
-        // Batasi ke kontainer listing utama agar widget sidebar tidak ikut terambil
+        val timelinePosts = doc.select("ul.timeline li.timeline-post, li.timeline-post")
+        if (timelinePosts.isNotEmpty()) return timelinePosts
+
         val scopes = doc.select("section.recent-blog .cat-box-content, div.post-listing .post-inner")
         val nodes = if (scopes.isNotEmpty()) {
             scopes.flatMap { it.select("article.item-list, li.timeline-post") }
         } else {
-            doc.select("article.item-list, li.timeline-post")
+            emptyList()
         }
-        return nodes
+        return if (nodes.isNotEmpty()) nodes else doc.select("article.item-list, li.timeline-post")
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {

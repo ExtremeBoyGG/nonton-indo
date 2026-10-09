@@ -87,11 +87,27 @@ class AnimeIndo : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/search.php?q=$query").document
+        val fromTables = document.select("table.otable").mapNotNull { table ->
+            val link = table.selectFirst("td.videsc a[href]")
+                ?: table.selectFirst("td.vithumb a[href]")
+                ?: return@mapNotNull null
+            val href = link.attr("href").ifBlank { null } ?: return@mapNotNull null
+            val title = table.selectFirst("td.videsc a[href]")?.text()?.trim()?.ifBlank { null }
+                ?: return@mapNotNull null
+            val poster = table.selectFirst("td.vithumb img")?.let { img ->
+                img.attr("src").ifBlank { null } ?: img.attr("data-original").ifBlank { null }
+            }?.let { fixUrl(it) }
+            newAnimeSearchResponse(title, fixUrl(href), TvType.Anime) { this.posterUrl = poster }
+        }
+        if (fromTables.isNotEmpty()) return fromTables.distinctBy { it.url }
+
         return document.select("div.menu a[href]").mapNotNull { a ->
             val inner = a.selectFirst("div.list-anime") ?: return@mapNotNull null
             val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
             val title = inner.selectFirst("p")?.text()?.trim()?.ifBlank { null } ?: return@mapNotNull null
-            val poster = inner.selectFirst("img")?.attr("data-original")?.ifBlank { null }
+            val poster = inner.selectFirst("img")?.let { img ->
+                img.attr("data-original").ifBlank { null } ?: img.attr("src")
+            }?.let { fixUrl(it) }
             newAnimeSearchResponse(title, fixUrl(href), TvType.Anime) { this.posterUrl = poster }
         }.distinctBy { it.url }
     }
