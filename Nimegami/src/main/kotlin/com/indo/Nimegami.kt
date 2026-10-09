@@ -1,14 +1,13 @@
 package com.indo
 
-import android.util.Base64
-import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.core.type.TypeReference
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import org.jsoup.nodes.Element
+import java.net.URLDecoder
 
 class Nimegami : MainAPI() {
     override var mainUrl = "https://nimegami.id"
@@ -19,28 +18,15 @@ class Nimegami : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     private val ua = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-        "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8"
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/"
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/page/" to "Anime Terbaru",
-        "$mainUrl" to "Rekomendasi"
+        "$mainUrl/anime/?sort=updated" to "Anime Terbaru",
+        "$mainUrl/anime/?status=RELEASING&sort=updated" to "Sedang Tayang (Ongoing)",
+        "$mainUrl/anime/?sort=score" to "Paling Populer"
     )
-
-    data class NimegamiStream(
-        @JsonProperty("format") val format: String?,
-        @JsonProperty("url") val url: List<String>?
-    )
-
-    private fun getImg(el: org.jsoup.nodes.Element): String? {
-        val img = el.selectFirst("img") ?: return null
-        val dataSrc = img.attr("data-src")
-        if (dataSrc.isNotBlank()) return dataSrc
-        val src = img.attr("src")
-        if (src.isNotBlank() && !src.startsWith("data:")) return src
-        return null
-    }
 
     private fun parseQuality(format: String): Int {
         return when {
@@ -53,112 +39,113 @@ class Nimegami : MainAPI() {
         }
     }
 
-    private val jsonMapper = ObjectMapper()
+    private fun extractPoster(element: Element): String? {
+        val src = element.selectFirst("img.poster-image, img")?.let { img ->
+            img.attr("src").ifBlank { img.attr("data-src") }
+        } ?: return null
 
-    private fun decodeStreamData(b64: String): List<NimegamiStream> {
-        return try {
-            val json = String(Base64.decode(b64, Base64.DEFAULT))
-            jsonMapper.readValue(json, object : TypeReference<List<NimegamiStream>>() {})
-                ?: emptyList()
-        } catch (e: Exception) { emptyList() }
+        val encoded = Regex("""[?&]url=([^&]+)""").find(src)?.groupValues?.getOrNull(1)
+        return if (encoded != null) {
+            val decoded = try {
+                URLDecoder.decode(encoded, "UTF-8")
+            } catch (_: Exception) {
+                encoded
+            }
+            fixUrl(decoded)
+        } else {
+            fixUrl(src)
+        }
+    }
+
+    private fun toSearchResponse(element: Element): SearchResponse? {
+        val link = element.selectFirst("a.poster-link, a.card-title, a[href]") ?: return null
+        val href = fixUrlNull(link.attr("href")) ?: return null
+        val title = element.selectFirst("a.card-title, h2, h3")?.text()?.trim()
+            ?: element.selectFirst("img")?.attr("alt")?.trim()
+            ?: return null
+        if (title.isBlank()) return null
+
+        val poster = extractPoster(element)
+        val ratingText = element.selectFirst(".score-badge, span.rating")?.text()
+            ?.replace(Regex("[^0-9.]"), "")
+        val rating = ratingText?.toDoubleOrNull()
+        val format = element.selectFirst(".format-badge")?.text()?.trim().orEmpty()
+        val tvType = if (format.contains("MOVIE", true)) TvType.AnimeMovie else TvType.Anime
+
+        return newAnimeSearchResponse(title, href, tvType) {
+            this.posterUrl = poster
+            rating?.let { this.score = Score.from10(it) }
+        }
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (request.name == "Rekomendasi") {
-            val doc = app.get("$mainUrl/", headers = ua).document
-            val home = doc.select("div.wrapper-2-a article").mapNotNull { article ->
-                val a = article.selectFirst("a[href]") ?: return@mapNotNull null
-                val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-                val title = article.selectFirst("div.title-post2")?.text()?.trim()
-                    ?.ifBlank { null } ?: return@mapNotNull null
-                val img = article.selectFirst("img")?.let { el ->
-                    val src = el.attr("data-src").ifBlank { el.attr("src").ifBlank { null } } ?: return@let null
-                    src.replace(Regex("""-\d+x\d+(?=\.\w+$)"""), "")
-                }
-                newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = img }
-            }.distinctBy { it.url }
-            return newHomePageResponse(request.name, home)
+        val url = if (page <= 1) {
+            "${request.data}&page=1"
+        } else {
+            "${request.data}&page=$page"
         }
-
-        val doc = app.get(request.data + page, headers = ua).document
-        val home = doc.select("div.post-article article").mapNotNull { article ->
-            if (getImg(article) == null) return@mapNotNull null
-            val a = article.selectFirst("h2 a, h3 a, a[rel=bookmark]")
-                ?: article.select("a[href]").firstOrNull { it.text().isNotBlank() }
-                ?: return@mapNotNull null
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
-            val ratingText = article.selectFirst("div.rating")?.text()
-                ?.replace(Regex("[^0-9.]"), "") ?: ""
-            val rating = ratingText.toFloatOrNull()
-            newAnimeSearchResponse(title, href, TvType.Anime) {
-                this.posterUrl = getImg(article)
-                this.score = Score.from10(rating?.toDouble())
-            }
-        }.distinctBy { it.url }
-        return newHomePageResponse(request.name, home)
+        val doc = app.get(url, headers = ua).document
+        val items = doc.select("article.anime-card, div.anime-grid article").mapNotNull { toSearchResponse(it) }
+        return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = app.get("$mainUrl/?s=$query", headers = ua).document
-        return doc.select("article, div.item, div.animepost").mapNotNull { article ->
-            if (getImg(article) == null) return@mapNotNull null
-            val a = article.selectFirst("h2 a, h3 a, a[rel=bookmark]")
-                ?: article.select("a[href]").firstOrNull { it.text().isNotBlank() }
-                ?: return@mapNotNull null
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = a.text().trim().ifBlank { null } ?: return@mapNotNull null
-            newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = getImg(article) }
-        }.distinctBy { it.url }
+        val url = "$mainUrl/anime/?q=${query.trim().replace(" ", "+")}"
+        val doc = app.get(url, headers = ua).document
+        return doc.select("article.anime-card, div.anime-grid article").mapNotNull { toSearchResponse(it) }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = ua).document
-
-        val title = doc.selectFirst("h1.title, h1")?.text()?.trim()
+        val title = doc.selectFirst("h1")?.text()?.trim()
             ?.replace(Regex("\\s*Sub Indo.*", RegexOption.IGNORE_CASE), "")
-            ?.replace(Regex("\\s*:.*Episode.*", RegexOption.IGNORE_CASE), "")
-            ?.trim() ?: throw ErrorLoadingException("Title not found")
+            ?.trim() ?: "Anime"
 
-        val poster = doc.selectFirst("div.thumbnail img, div.coverthumbnail img")
-            ?.let { it.attr("src").ifBlank { null } }
+        val poster = doc.selectFirst("img.poster-image, img[alt]")?.let { extractPoster(it) }
+        val description = doc.selectFirst("section#informasi p, div.synopsis p, p.synopsis")?.text()?.trim()
+            ?: doc.selectFirst("meta[name=description]")?.attr("content")
 
-        val description = doc.selectFirst("div.content[id=Sinopsis] p")?.text()?.trim()
-        val genres = doc.select("div.info2 td.info_a a").map { it.text() }.filter { it.isNotBlank() }
+        val genres = doc.select("a[href*='/category/']").map { it.text().replace("#", "").trim() }
+            .filter { it.isNotBlank() }.distinct()
 
-        // Cek apakah movie (batch-dlcuy) atau series (per-episode download)
-        val isBatch = doc.selectFirst("div.batch-dlcuy") != null
-        val epUls    = doc.select("div.download ul")
-        val epH4s    = doc.select("div.download h4")
-        val streamEps = doc.select("li.select-eps")
+        val year = Regex("""\b(19\d\d|20\d\d)\b""").find(
+            doc.selectFirst(".card-meta, .anime-meta, section#informasi")?.text().orEmpty()
+        )?.groupValues?.getOrNull(1)?.toIntOrNull()
 
-        return if (isBatch || epUls.size <= 1) {
-            // === MOVIE ===
-            newMovieLoadResponse(title, url, TvType.AnimeMovie, url) {
-                posterUrl = poster
-                plot = description
+        val score = doc.selectFirst(".score-badge")?.text()
+            ?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
+
+        val isMovie = doc.selectFirst(".format-badge")?.text()?.contains("MOVIE", true) == true
+
+        val epElements = doc.select("[id^=download_episode_]")
+        val episodes = epElements.mapNotNull { el ->
+            val epId = el.attr("id").removePrefix("download_episode_")
+            val epNum = epId.toIntOrNull()
+            val epName = el.selectFirst("h3")?.text()?.trim() ?: "Episode $epId"
+            newEpisode("$url::$epId") {
+                this.name = epName
+                this.episode = epNum
+            }
+        }.sortedBy { it.episode }
+
+        if (isMovie || episodes.size <= 1) {
+            val streamData = if (episodes.isNotEmpty()) episodes.first().data else "$url::1"
+            return newMovieLoadResponse(title, url, TvType.AnimeMovie, streamData) {
+                this.posterUrl = poster
+                this.plot = description
                 this.tags = genres
+                this.year = year
+                score?.let { this.score = Score.from10(it) }
             }
-        } else {
-            // === SERIES — semua episode di satu halaman ===
-            // Data episode = "pageUrl::index"
-            val episodes = epUls.mapIndexed { i, _ ->
-                val epName = epH4s.getOrNull(i)?.text()?.trim()
-                    ?: "Episode ${i + 1}"
-                val epNum = Regex("Episode\\s*(\\d+)", RegexOption.IGNORE_CASE)
-                    .find(epName)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: (i + 1)
-                newEpisode("$url::$i") {
-                    name    = epName
-                    episode = epNum
-                }
-            }
+        }
 
-            newAnimeLoadResponse(title, url, TvType.Anime) {
-                posterUrl = poster
-                plot = description
-                this.tags = genres
-                addEpisodes(DubStatus.Subbed, episodes)
-            }
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
+            this.posterUrl = poster
+            this.plot = description
+            this.tags = genres
+            this.year = year
+            score?.let { this.score = Score.from10(it) }
+            addEpisodes(DubStatus.Subbed, episodes)
         }
     }
 
@@ -168,77 +155,58 @@ class Nimegami : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // data bisa berupa "url" (movie) atau "url::index" (episode series)
-        val parts    = data.split("::")
-        val pageUrl  = parts[0]
-        val epIndex  = parts.getOrNull(1)?.toIntOrNull()
+        val parts = data.split("::")
+        val pageUrl = parts[0]
+        val epId = parts.getOrNull(1) ?: "1"
 
         val doc = app.get(pageUrl, headers = ua).document
+        val container = doc.selectFirst("#download_episode_$epId")
+            ?: doc.selectFirst("#download")
+            ?: doc
 
-        if (epIndex == null) {
-            // === MOVIE: gunakan batch-dlcuy ===
-            doc.select("div.batch-dlcuy li").forEach { li ->
-                li.select("a[href]").forEach { a ->
-                    val href = a.attr("href").ifBlank { null } ?: return@forEach
-                    loadExtractor(fixUrl(href), pageUrl, subtitleCallback, callback)
-                }
-            }
+        var found = false
+        val rows = container.select(".download-row")
+        val downloadRows = if (rows.isNotEmpty()) rows else listOf(container)
 
-            // Streaming dari li.select-eps (hanya 1 untuk movie)
-            val streamB64 = doc.selectFirst("li.select-eps")?.attr("data-stream") ?: ""
-            if (streamB64.isNotBlank()) {
-                decodeStreamData(streamB64).forEach { entry ->
-                    val format = entry.format ?: return@forEach
-                    val quality = parseQuality(format)
-                    val urls = entry.url ?: return@forEach
-                    urls.forEachIndexed { idx, streamUrl ->
-                        if (streamUrl.isNotBlank()) {
-                            val separator = if (streamUrl.contains("?")) "&" else "?"
-                            val fixedUrl = if (streamUrl.contains("dlgan.halahgan.com") && !streamUrl.contains("direct=1"))
-                                "$streamUrl${separator}direct=1" else streamUrl
-                            val serverLabel = if (urls.size > 1) "Server ${idx + 1}" else "Server"
-                            callback(newExtractorLink("Nimegami", serverLabel, fixedUrl) {
-                                this.quality = quality
-                                this.referer = pageUrl
-                            })
+        for (row in downloadRows) {
+            val qualityText = row.selectFirst(".quality-label strong")?.text()?.trim() ?: ""
+            val quality = parseQuality(qualityText)
+
+            for (a in row.select("a[href*='/download/']")) {
+                val href = a.attr("href").ifBlank { null } ?: continue
+                val mirrorName = a.text().trim().ifBlank { "Download" }
+                val fullHref = fixUrl(href)
+
+                try {
+                    val resp = app.get(fullHref, headers = ua, allowRedirects = false)
+                    val location = resp.headers["location"] ?: resp.headers["Location"]
+                    if (!location.isNullOrBlank()) {
+                        if (location.contains("berkasdrive.com")) {
+                            val directStreamUrl = location
+                                .replace("/hal/download/", "/public/download/")
+                                .replace("/hal/streaming/", "/public/download/")
+
+                            callback(
+                                newExtractorLink(
+                                    this.name,
+                                    "$name ($qualityText - $mirrorName)".trim(),
+                                    directStreamUrl,
+                                    type = ExtractorLinkType.VIDEO
+                                ) {
+                                    this.quality = quality
+                                    this.referer = "$mainUrl/"
+                                }
+                            )
+                            found = true
+                        } else {
+                            loadExtractor(location, pageUrl, subtitleCallback, callback)
+                            found = true
                         }
                     }
-                }
-            }
-        } else {
-            // === SERIES: ambil berdasarkan index ===
-            // Download links — ul ke-N di dalam div.download
-            val ul = doc.select("div.download ul").getOrNull(epIndex)
-            ul?.select("li")?.forEach { li ->
-                li.select("a[href]").forEach { a ->
-                    val href = a.attr("href").ifBlank { null } ?: return@forEach
-                    loadExtractor(fixUrl(href), pageUrl, subtitleCallback, callback)
-                }
-            }
-
-            // Streaming dari li.select-eps ke-N
-            val streamB64 = doc.select("li.select-eps").getOrNull(epIndex)?.attr("data-stream") ?: ""
-            if (streamB64.isNotBlank()) {
-                decodeStreamData(streamB64).forEach { entry ->
-                    val format = entry.format ?: return@forEach
-                    val quality = parseQuality(format)
-                    val urls = entry.url ?: return@forEach
-                    urls.forEachIndexed { idx, streamUrl ->
-                        if (streamUrl.isNotBlank()) {
-                            val separator = if (streamUrl.contains("?")) "&" else "?"
-                            val fixedUrl = if (streamUrl.contains("dlgan.halahgan.com") && !streamUrl.contains("direct=1"))
-                                "$streamUrl${separator}direct=1" else streamUrl
-                            val serverLabel = if (urls.size > 1) "Server ${idx + 1}" else "Server"
-                            callback(newExtractorLink("Nimegami", serverLabel, fixedUrl) {
-                                this.quality = quality
-                                this.referer = pageUrl
-                            })
-                        }
-                    }
-                }
+                } catch (_: Exception) {}
             }
         }
 
-        return true
+        return found
     }
 }
