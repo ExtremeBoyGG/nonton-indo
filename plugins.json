@@ -162,7 +162,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Movie", "TvSeries", "Anime"],
-        "version": 3,
+        "version": 4,
         "internalName": "MovieBox",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/MovieBox.cs3",
         "name": "MovieBox"
@@ -194,5 +194,33 @@
         "internalName": "Sokuja",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Sokuja.cs3",
         "name": "Sokuja"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://tv12.lk21official.cc&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Movie"],
+        "version": 2,
+        "internalName": "LK21",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/LK21.cs3",
+        "name": "LK21"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://anichin.moe&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Anime", "AnimeMovie"],
+        "version": 2,
+        "internalName": "Anichin",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Anichin.cs3",
+        "name": "Anichin"
     }
 ]

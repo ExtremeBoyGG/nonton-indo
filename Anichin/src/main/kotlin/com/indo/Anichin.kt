@@ -251,15 +251,49 @@ class Anichin : MainAPI() {
         } catch (_: Exception) { }
     }
 
+    private suspend fun extractOkru(url: String, callback: (ExtractorLink) -> Unit) {
+        try {
+            val doc = app.get(url).text
+            val opts = Regex("""data-options=["']([^"']+)["']""").find(doc)?.groupValues?.getOrNull(1) ?: return
+            val jsonStr = opts.replace("&quot;", "\"")
+            val root = tryParseJson<Map<String, Any?>>(jsonStr) ?: return
+            val flashvars = root["flashvars"] as? Map<*, *> ?: return
+            val metadataRaw = flashvars["metadata"]
+            val metadata = (metadataRaw as? Map<*, *>) ?: (metadataRaw as? String)?.let { tryParseJson<Map<String, Any?>>(it) } ?: return
+            val videos = metadata["videos"] as? List<*> ?: return
+            videos.forEach { v ->
+                val map = v as? Map<*, *> ?: return@forEach
+                val qualityName = map["name"]?.toString() ?: "SD"
+                val videoUrl = map["url"]?.toString() ?: return@forEach
+                if (!videoUrl.startsWith("http")) return@forEach
+                val q = when (qualityName.lowercase()) {
+                    "full" -> Qualities.P1080.value
+                    "hd" -> Qualities.P720.value
+                    "sd" -> Qualities.P480.value
+                    "low" -> Qualities.P360.value
+                    "lowest", "mobile" -> Qualities.P240.value
+                    else -> Qualities.Unknown.value
+                }
+                callback(
+                    newExtractorLink("Okru", "Okru $qualityName", videoUrl) {
+                        this.quality = q
+                        this.type = ExtractorLinkType.VIDEO
+                    }
+                )
+            }
+        } catch (_: Exception) { }
+    }
+
     private suspend fun extractPlaymogo(url: String, callback: (ExtractorLink) -> Unit) {
         try {
             val doc = app.get(url).text
             val passMd5 = Regex("/pass_md5/([^/]+)/([^/\\s\"')]+)").find(doc) ?: return
             val videoBase = app.get("https://playmogo.com${passMd5.value}", referer = url).text.trim()
-            if (videoBase.isBlank()) return
+            if (videoBase.isBlank() || !videoBase.startsWith("http")) return
             val token = passMd5.groupValues[2]
             val expiry = (System.currentTimeMillis() + 86400000).toString()
             val videoUrl = if (videoBase.endsWith("~")) "$videoBase$token?token=$token&expiry=$expiry" else videoBase
+            if (!videoUrl.startsWith("http")) return
             callback.invoke(
                 newExtractorLink("DoodStream", "DoodStream", videoUrl) {
                     this.referer = "https://playmogo.com"
@@ -277,7 +311,11 @@ class Anichin : MainAPI() {
     ) {
         val fullUrl = if (url.startsWith("//")) "https:$url" else url
         when {
-            fullUrl.contains("morencius.com") || fullUrl.contains("minochinos.com") || fullUrl.contains("vidhide") -> {
+            fullUrl.contains("ok.ru") -> {
+                extractOkru(fullUrl, callback)
+            }
+            fullUrl.contains("morencius.com") || fullUrl.contains("minochinos.com") ||
+            fullUrl.contains("vidhide") || fullUrl.contains("bingezove.com") || fullUrl.contains("vidhidepre.com") -> {
                 extractVidhide(fullUrl, callback)
             }
             fullUrl.contains("rumble.com") -> {
@@ -318,7 +356,7 @@ class Anichin : MainAPI() {
                 val decoded = String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)).trim()
                 val iframeSrc = Regex("""<iframe[^>]+src=["']?([^"'>\s]+)""", RegexOption.IGNORE_CASE)
                     .find(decoded)?.groupValues?.getOrNull(1)?.trim()
-                    ?: if (decoded.startsWith("http://") || decoded.startsWith("https://")) decoded else null
+                    ?: Regex("""https?://[^\s"'<>]+""").find(decoded)?.value
 
                 if (!iframeSrc.isNullOrBlank()) {
                     extractUrl(iframeSrc, data, subtitleCallback, callback)

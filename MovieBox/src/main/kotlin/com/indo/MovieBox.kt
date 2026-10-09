@@ -248,7 +248,11 @@ class MovieBox : MainAPI() {
             }
         }
 
-        return newMovieLoadResponse(title, url, tvType, "$mainUrl/movies/$detailPath?id=$subjectId&type=/movie/detail&detailSe=0&detailEp=0&lang=en") {
+        val firstSeason = seasons.firstOrNull()
+        val defaultSe = toInt(firstSeason?.get("se")) ?: 0
+        val defaultEp = if ((toInt(firstSeason?.get("maxEp")) ?: 0) >= 1) 1 else 0
+
+        return newMovieLoadResponse(title, url, tvType, "$mainUrl/movies/$detailPath?id=$subjectId&type=/movie/detail&detailSe=$defaultSe&detailEp=$defaultEp&lang=en") {
             this.posterUrl = poster
             this.plot = plot
             this.tags = tags
@@ -265,16 +269,26 @@ class MovieBox : MainAPI() {
     ): Boolean {
         val detailPath = detailPathFromUrl(data)
         val sid = Regex("[?&](sid|id)=([^&]+)").find(data)?.groupValues?.getOrNull(2)
-        val se = Regex("[?&](?:se|detailSe)=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
-        val ep = Regex("[?&](?:ep|detailEp)=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
+        var se = Regex("[?&](?:se|detailSe)=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
+        var ep = Regex("[?&](?:ep|detailEp)=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
 
         val detRaw = apiGetWithToken("/wefeed-h5api-bff/detail?detailPath=$detailPath")
         val detRoot = tryParseJson<Map<String, Any?>>(detRaw)
         val detData = detRoot?.get("data") as? Map<*, *>
         val detSubject = detData?.get("subject") as? Map<*, *>
+        val detResource = detData?.get("resource") as? Map<*, *>
 
         val subjectId = if (!sid.isNullOrBlank()) sid else detSubject?.get("subjectId")?.toString().orEmpty()
         if (subjectId.isBlank()) return false
+
+        if (se == "0" && ep == "0") {
+            val rSeasons = (detResource?.get("seasons") as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+            val firstS = rSeasons.firstOrNull()
+            if (firstS != null && (toInt(firstS["se"]) ?: 0) >= 1) {
+                se = (toInt(firstS["se"]) ?: 1).toString()
+                ep = if ((toInt(firstS["maxEp"]) ?: 0) >= 1) "1" else "0"
+            }
+        }
 
         val dubs = (detSubject?.get("dubs") as? List<*>)
             ?.mapNotNull { it as? Map<*, *> }
@@ -290,66 +304,78 @@ class MovieBox : MainAPI() {
             val dubId = dub["subjectId"]?.toString() ?: continue
             val dubName = dub["lanName"]?.toString() ?: "Unknown"
 
-            val spaReferer = "https://123movienow.cc/spa/videoPlayPage/movies/$detailPath?id=$dubId&type=/movie/detail&detailSe=$se&detailEp=$ep&lang=en"
-            val headers = mapOf(
-                "Accept" to "application/json",
-                "User-Agent" to USER_AGENT,
-                "X-Client-Info" to "{\"timezone\":\"Asia/Jakarta\"}",
-                "X-Vip-Restrict" to "0",
-                "Referer" to spaReferer
-            )
+            val tryConfigs = mutableListOf(Pair(se, ep))
+            if (se == "0" && ep == "0") {
+                tryConfigs.add(Pair("1", "1"))
+            } else {
+                tryConfigs.add(Pair("0", "0"))
+            }
 
-            val playRaw = app.get(
-                "$apiBase/wefeed-h5api-bff/subject/play?subjectId=$dubId&se=$se&ep=$ep&detailPath=$detailPath&streamSignType=0",
-                headers = headers
-            ).text
+            for ((curSe, curEp) in tryConfigs) {
+                val spaReferer = "https://123movienow.cc/spa/videoPlayPage/movies/$detailPath?id=$dubId&type=/movie/detail&detailSe=$curSe&detailEp=$curEp&lang=en"
+                val headers = mapOf(
+                    "Accept" to "application/json",
+                    "User-Agent" to USER_AGENT,
+                    "X-Client-Info" to "{\"timezone\":\"Asia/Jakarta\"}",
+                    "X-Vip-Restrict" to "0",
+                    "Referer" to spaReferer
+                )
 
-            val playRoot = tryParseJson<Map<String, Any?>>(playRaw) ?: continue
-            val playData = playRoot["data"] as? Map<*, *> ?: continue
-            val hasResource = playData["hasResource"] as? Boolean ?: false
-            if (!hasResource) continue
+                val playRaw = app.get(
+                    "$apiBase/wefeed-h5api-bff/subject/play?subjectId=$dubId&se=$curSe&ep=$curEp&detailPath=$detailPath&streamSignType=0",
+                    headers = headers
+                ).text
 
-            val streams = (playData["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-            val hls = (playData["hls"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-            val dash = (playData["dash"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
-            val all = streams + hls + dash
+                val playRoot = tryParseJson<Map<String, Any?>>(playRaw) ?: continue
+                val playData = playRoot["data"] as? Map<*, *> ?: continue
+                val hasResource = playData["hasResource"] as? Boolean ?: false
+                if (!hasResource) continue
 
-            all.forEach { item ->
-                val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
-                val res = item["resolutions"]?.toString()
-                val streamId = item["id"]?.toString()?.takeIf { it.isNotBlank() }
+                val streams = (playData["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+                val hls = (playData["hls"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+                val dash = (playData["dash"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+                val all = streams + hls + dash
+                if (all.isEmpty()) continue
 
-                val label = if (dubs.isNotEmpty()) "$dubName ${res ?: "Auto"}" else "${res ?: "Auto"}"
+                all.forEach { item ->
+                    val u = item["url"]?.toString()?.takeIf { it.startsWith("http") } ?: return@forEach
+                    val res = item["resolutions"]?.toString()
+                    val streamId = item["id"]?.toString()?.takeIf { it.isNotBlank() }
 
-                val q = when {
-                    (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
-                    (res ?: "").contains("720") || u.contains("720", true) -> Qualities.P720.value
-                    (res ?: "").contains("480") || u.contains("480", true) -> Qualities.P480.value
-                    (res ?: "").contains("360") || u.contains("360", true) -> Qualities.P360.value
-                    else -> Qualities.Unknown.value
-                }
+                    val label = if (dubs.isNotEmpty()) "$dubName ${res ?: "Auto"}" else "${res ?: "Auto"}"
 
-                callback(newExtractorLink(name, label, u) {
-                    this.quality = q
-                    this.referer = "https://123movienow.cc/"
-                })
-                found = true
+                    val q = when {
+                        (res ?: "").contains("1080") || u.contains("1080", true) -> Qualities.P1080.value
+                        (res ?: "").contains("720") || u.contains("720", true) -> Qualities.P720.value
+                        (res ?: "").contains("480") || u.contains("480", true) -> Qualities.P480.value
+                        (res ?: "").contains("360") || u.contains("360", true) -> Qualities.P360.value
+                        else -> Qualities.Unknown.value
+                    }
 
-                if (streamId != null) {
-                    val capRaw = app.get(
-                        "$apiBase/wefeed-h5api-bff/subject/caption?format=MP4&id=$streamId&subjectId=$dubId&detailPath=$detailPath",
-                        headers = headers
-                    ).text
-                    val capRoot = tryParseJson<Map<String, Any?>>(capRaw)
-                    val capData = capRoot?.get("data") as? Map<*, *>
-                    val captions = capData?.get("captions") as? List<*>
-                    captions?.forEach { cap ->
-                        val capMap = cap as? Map<*, *> ?: return@forEach
-                        val capUrl = capMap["url"]?.toString()?.takeIf { it.isNotBlank() } ?: return@forEach
-                        val capLang = capMap["lanName"]?.toString() ?: capMap["lan"]?.toString() ?: "Unknown"
-                        subtitleCallback(SubtitleFile(capLang, capUrl))
+                    callback(newExtractorLink(name, label, u) {
+                        this.quality = q
+                        this.referer = "https://123movienow.cc/"
+                    })
+                    found = true
+
+                    if (streamId != null) {
+                        val capRaw = app.get(
+                            "$apiBase/wefeed-h5api-bff/subject/caption?format=MP4&id=$streamId&subjectId=$dubId&detailPath=$detailPath",
+                            headers = headers
+                        ).text
+                        val capRoot = tryParseJson<Map<String, Any?>>(capRaw)
+                        val capData = capRoot?.get("data") as? Map<*, *>
+                        val captions = capData?.get("captions") as? List<*>
+                        captions?.forEach { cap ->
+                            val capMap = cap as? Map<*, *> ?: return@forEach
+                            val capUrl = capMap["url"]?.toString()?.takeIf { it.isNotBlank() } ?: return@forEach
+                            val capLang = capMap["lanName"]?.toString() ?: capMap["lan"]?.toString() ?: "Unknown"
+                            subtitleCallback(SubtitleFile(capLang, capUrl))
+                        }
                     }
                 }
+
+                if (found) break
             }
         }
 

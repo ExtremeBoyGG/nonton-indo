@@ -3,10 +3,12 @@ package com.indo
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONObject
 import org.jsoup.nodes.Element
+
 
 class LK21 : MainAPI() {
     override var mainUrl = "https://tv12.lk21official.cc"
@@ -98,6 +100,70 @@ class LK21 : MainAPI() {
         }
     }
 
+    private suspend fun extractHydrax(
+        embedUrl: String,
+        playerUrl: String,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        try {
+            val areq = app.get(
+                embedUrl,
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+                    "Referer" to playerUrl
+                )
+            ).text
+
+            val enc = Regex("""const\s+datas\s*=\s*"([^"]*)"""").find(areq)?.groupValues?.getOrNull(1) ?: return false
+
+            val decRes = app.post(
+                "https://enc-dec.app/api/dec-abyss",
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+                    "Content-Type" to "application/json",
+                    "Origin" to "https://playhydrax.com",
+                    "Referer" to "https://playhydrax.com/"
+                ),
+                data = mapOf("text" to enc)
+            ).text
+
+            val decJson = JSONObject(decRes)
+            val result = decJson.optJSONObject("result") ?: return false
+            val sources = result.optJSONArray("sources") ?: return false
+
+            var found = false
+            for (i in 0 until sources.length()) {
+                val srcObj = sources.optJSONObject(i) ?: continue
+                if (!srcObj.optBoolean("status", true)) continue
+                val srcUrl = srcObj.optString("url")
+                if (srcUrl.isBlank() || !srcUrl.startsWith("http")) continue
+                val type = srcObj.optString("type")
+                val q = when {
+                    type.contains("1080") -> Qualities.P1080.value
+                    type.contains("720") -> Qualities.P720.value
+                    type.contains("480") -> Qualities.P480.value
+                    type.contains("360") -> Qualities.P360.value
+                    else -> Qualities.Unknown.value
+                }
+                callback(
+                    newExtractorLink(
+                        "Hydrax",
+                        "Hydrax $type",
+                        srcUrl,
+                        type = ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = q
+                        this.referer = "https://abyssplayer.com/"
+                    }
+                )
+                found = true
+            }
+            return found
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -123,9 +189,14 @@ class LK21 : MainAPI() {
             } else emptyList()
         }
 
+        // Prioritize Hydrax servers first
+        val sortedPlayerList = playerList.sortedByDescending { (name, url) ->
+            name.contains("hydrax", ignoreCase = true) || url.contains("hydrax", ignoreCase = true)
+        }
+
         var foundAny = false
 
-        for ((serverName, playerUrl) in playerList) {
+        for ((serverName, playerUrl) in sortedPlayerList) {
             try {
                 val match = Regex("""/iframe3/([^/]+)/([^/?&]+)""").find(playerUrl)
                 if (match != null) {
@@ -145,7 +216,12 @@ class LK21 : MainAPI() {
 
                     val embedUrl = try { JSONObject(postRes).optString("embedUrl") } catch (e: Exception) { null }
                     if (!embedUrl.isNullOrBlank()) {
-                        if (embedUrl.contains("playcdn.de")) {
+                        if (host.equals("hydrax", ignoreCase = true) || embedUrl.contains("abyssplayer") || embedUrl.contains("playhydrax")) {
+                            val hydraxFound = extractHydrax(embedUrl, playerUrl, callback)
+                            if (hydraxFound) {
+                                foundAny = true
+                            }
+                        } else if (embedUrl.contains("playcdn.de")) {
                             val slug = embedUrl.substringAfterLast("/").substringBefore("?")
                             val verifyRes = app.get(
                                 "https://playcdn.de/verify/$slug",
@@ -209,3 +285,4 @@ class LK21 : MainAPI() {
         return foundAny
     }
 }
+
