@@ -233,7 +233,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["AnimeMovie", "OVA", "Anime"],
-        "version": 4,
+        "version": 5,
         "internalName": "Kuramanime",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Kuramanime.cs3",
         "name": "Kuramanime"

@@ -149,6 +149,10 @@ class Kuramanime : MainAPI() {
         }
     }
 
+    private val defaultHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -156,7 +160,9 @@ class Kuramanime : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         var found = false
-        val doc = app.get(data).document
+        val res = app.get(data, headers = defaultHeaders)
+        val cookies = res.cookies
+        val doc = res.document
         val html = doc.outerHtml()
 
         try {
@@ -164,7 +170,7 @@ class Kuramanime : MainAPI() {
             val kk = Regex("data-kk=\"([^\"]+)\"").find(html)?.groupValues?.getOrNull(1)
 
             if (!csrf.isNullOrBlank() && !kk.isNullOrBlank()) {
-                val cfg = app.get("$mainUrl/assets/js/$kk.js").text
+                val cfg = app.get("$mainUrl/assets/js/$kk.js", headers = defaultHeaders, cookies = cookies).text
 
                 fun cfgValue(key: String): String =
                     Regex("$key:\\s*'([^']+)'").find(cfg)?.groupValues?.getOrNull(1) ?: ""
@@ -178,23 +184,25 @@ class Kuramanime : MainAPI() {
                     val requestId = (1..6).map { ('a'..'z').random() }.joinToString("")
                     val token = app.get(
                         "$mainUrl/assets/$authParam",
-                        headers = mapOf(
+                        headers = defaultHeaders + mapOf(
                             "X-Fuck-ID" to fuckId,
                             "X-Request-ID" to requestId,
                             "X-Request-Index" to "0"
-                        )
+                        ),
+                        cookies = cookies
                     ).text.trim()
 
                     if (token.isNotBlank()) {
                         val postDoc = app.post(
                             "$data?$pageTokenKey=$token&$serverKey=kuramadrive&page=1",
-                            headers = mapOf(
+                            headers = defaultHeaders + mapOf(
                                 "Accept" to "text/html, */*; q=0.01",
                                 "X-Requested-With" to "XMLHttpRequest",
                                 "X-CSRF-TOKEN" to csrf,
                                 "Origin" to mainUrl,
                                 "Referer" to data
                             ),
+                            cookies = cookies,
                             data = mapOf("authorization" to authValue)
                         ).document
 
