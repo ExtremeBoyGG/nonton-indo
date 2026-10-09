@@ -22,7 +22,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Anime", "AnimeMovie", "OVA"],
-        "version": 1,
+        "version": 2,
         "internalName": "Oploverz",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Oploverz.cs3",
         "name": "Oploverz"
@@ -162,7 +162,7 @@
         "language": "id",
         "authors": ["ExtremeBoy"],
         "tvTypes": ["Movie", "TvSeries", "Anime"],
-        "version": 2,
+        "version": 3,
         "internalName": "MovieBox",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/MovieBox.cs3",
         "name": "MovieBox"
@@ -180,5 +180,19 @@
         "internalName": "Donghub",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Donghub.cs3",
         "name": "Donghub"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://x6.sokuja.uk&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["AnimeMovie", "OVA", "Anime"],
+        "version": 3,
+        "internalName": "Sokuja",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Sokuja.cs3",
+        "name": "Sokuja"
     }
 ]

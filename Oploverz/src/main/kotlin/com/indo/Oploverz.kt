@@ -27,27 +27,51 @@ class Oploverz : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
+        "$mainUrl/" to "Rekomendasi",
+        "$mainUrl/series/?status=ongoing&order=update&page=" to "Anime Ongoing",
         "$mainUrl/page/" to "Update Terbaru"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page <= 1) "$mainUrl/" else "${request.data}$page/"
+        val url = if (page <= 1) {
+            if (request.data.endsWith("page=")) "${request.data}1" else request.data
+        } else {
+            if (request.data.endsWith("page=")) "${request.data}$page" else "${request.data}$page/"
+        }
         val document = app.get(url).document
-        val home = document.select("div.bsx").mapNotNull { el ->
-            val a = el.selectFirst("a[href]") ?: return@mapNotNull null
-            val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
-            val title = el.selectFirst("div.tt")?.ownText()?.trim()
-                ?: el.selectFirst("h2")?.text()?.trim()
-                ?: a.attr("title").ifBlank { null } ?: return@mapNotNull null
-            val poster = el.selectFirst("img")?.attr("src")?.ifBlank { null }
-            val epText = el.selectFirst("span.epx")?.text()?.trim() ?: ""
-            val epNum = Regex("(\\d+)").find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            val animeUrl = if (epNum != null) episodeUrlToAnimeUrl(href) else href
-            newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
-                this.posterUrl = poster
-                addSub(epNum)
-            }
-        }.distinctBy { it.url }
+
+        val home = if (request.name == "Rekomendasi") {
+            val recElements = document.select("div.series-gen article.bs, div.series-gen div.bsx")
+            recElements.mapNotNull { el ->
+                val a = el.selectFirst("a[href]") ?: return@mapNotNull null
+                val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+                val title = el.selectFirst("div.tt.tts h2, div.tt.tts, div.tt")?.ownText()?.trim()
+                    ?: el.selectFirst("h2")?.text()?.trim()
+                    ?: a.attr("title").ifBlank { null } ?: return@mapNotNull null
+                val cleanTitle = title.replace(Regex("\\s*Episode\\s*\\d+.*", RegexOption.IGNORE_CASE), "").trim()
+                val poster = el.selectFirst("img")?.attr("src")?.ifBlank { null }
+                val animeUrl = episodeUrlToAnimeUrl(href)
+                newAnimeSearchResponse(cleanTitle, animeUrl, TvType.Anime) {
+                    this.posterUrl = poster
+                }
+            }.distinctBy { it.url }
+        } else {
+            document.select("div.bsx").mapNotNull { el ->
+                val a = el.selectFirst("a[href]") ?: return@mapNotNull null
+                val href = a.attr("href").ifBlank { null } ?: return@mapNotNull null
+                val title = el.selectFirst("div.tt")?.ownText()?.trim()
+                    ?: el.selectFirst("h2")?.text()?.trim()
+                    ?: a.attr("title").ifBlank { null } ?: return@mapNotNull null
+                val poster = el.selectFirst("img")?.attr("src")?.ifBlank { null }
+                val epText = el.selectFirst("span.epx")?.text()?.trim() ?: ""
+                val epNum = Regex("(\\d+)").find(epText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                val animeUrl = if (epNum != null) episodeUrlToAnimeUrl(href) else href
+                newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
+                    this.posterUrl = poster
+                    addSub(epNum)
+                }
+            }.distinctBy { it.url }
+        }
         return newHomePageResponse(request.name, home)
     }
 
@@ -70,7 +94,17 @@ class Oploverz : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+        var finalUrl = url
+        var document = app.get(finalUrl).document
+
+        if (!finalUrl.contains("/series/")) {
+            val seriesHref = document.selectFirst("div.nvs.nvsc a[href], a[aria-label='All Episodes'], a[href*='/series/']")?.attr("href")
+                ?: episodeUrlToAnimeUrl(finalUrl)
+            if (seriesHref.isNotBlank()) {
+                finalUrl = fixUrl(seriesHref)
+                document = app.get(finalUrl).document
+            }
+        }
 
         val title = document.selectFirst("h1.entry-title, h1")?.text()?.trim()
             ?.replace(Regex("\\s*Subtitle\\s*Indonesia.*", RegexOption.IGNORE_CASE), "")
@@ -95,10 +129,10 @@ class Oploverz : MainAPI() {
         }.reversed()
 
         val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), year, true)
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
+        return newAnimeLoadResponse(title, finalUrl, TvType.Anime) {
             engName = title
             posterUrl = tracker?.image ?: poster
-            backgroundPosterUrl = tracker?.cover
+            backgroundPosterUrl = tracker?.cover ?: poster
             this.year = year
             addEpisodes(DubStatus.Subbed, episodes)
             showStatus = status
@@ -112,23 +146,41 @@ class Oploverz : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data).document
 
-        // Iframe dari player-embed
-        document.select("div#pembed iframe, div.player-embed iframe, div.video-content iframe")
-            .forEach { iframe ->
-                val src = iframe.attr("src").ifBlank { null } ?: return@forEach
-                if (src.startsWith("http")) handleUrl(src, data, subtitleCallback, callback)
+        // Button servers (dsu-server)
+        document.select("button.dsu-server").forEach { btn ->
+            val dataUrl = btn.attr("data-url").ifBlank { null }
+            if (dataUrl != null && dataUrl.startsWith("http")) {
+                handleUrl(dataUrl, data, subtitleCallback, callback)
             }
+
+            val dataEmbed = btn.attr("data-embed").ifBlank { null }
+            if (dataEmbed != null) {
+                val decoded = try { String(Base64.getDecoder().decode(dataEmbed)) } catch (_: Exception) { null }
+                if (decoded != null) {
+                    val src = Regex("""src\s*=\s*["']([^"']+)["']""").find(decoded)?.groupValues?.getOrNull(1)
+                    if (src != null && src.startsWith("http")) {
+                        handleUrl(src, data, subtitleCallback, callback)
+                    }
+                }
+            }
+        }
+
+        // Iframe dari player-embed & pembed
+        document.select("div#pembed iframe, div.player-embed iframe, div.video-content iframe").forEach { iframe ->
+            val src = iframe.attr("src").ifBlank { null } ?: return@forEach
+            if (src.startsWith("http")) handleUrl(src, data, subtitleCallback, callback)
+        }
 
         // Mirror option values (base64 encoded iframes)
         document.select("select.mirror option").forEach { option ->
             val encoded = option.attr("value").ifBlank { null } ?: return@forEach
-            val decoded = try { String(Base64.getDecoder().decode(encoded)) } catch (e: Exception) { null } ?: return@forEach
-            val src = Regex("src\\s*=\\s*\"([^\"]+)\"").find(decoded)?.groupValues?.getOrNull(1) ?: return@forEach
+            val decoded = try { String(Base64.getDecoder().decode(encoded)) } catch (_: Exception) { null } ?: return@forEach
+            val src = Regex("""src\s*=\s*["']([^"']+)["']""").find(decoded)?.groupValues?.getOrNull(1) ?: return@forEach
             if (src.startsWith("http")) handleUrl(src, data, subtitleCallback, callback)
         }
 
-        // Gofile download link — pakai built-in Gofile extractor (API v2)
-        document.select("a[href*=gofile.io]").forEach { a ->
+        // Gofile & direct download links
+        document.select("a[href*=gofile.io], a.dsu-download[href]").forEach { a ->
             val href = a.attr("href").ifBlank { null } ?: return@forEach
             loadExtractor(href, data, subtitleCallback, callback)
         }
@@ -137,11 +189,57 @@ class Oploverz : MainAPI() {
     }
 
     private suspend fun handleUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
-        if (url.contains("blogger.com")) {
-            handleBloggerUrl(url, referer, subtitleCallback, callback)
-        } else {
-            loadExtractor(url, referer, subtitleCallback, callback)
+        when {
+            url.contains("blogger.com") -> handleBloggerUrl(url, referer, subtitleCallback, callback)
+            url.contains("vkspeed.com") -> handleVkspeedUrl(url, callback)
+            url.contains("play.xtwap.top") || url.contains("xtwap.top") -> handleXtwapUrl(url, callback)
+            else -> loadExtractor(url, referer, subtitleCallback, callback)
         }
+    }
+
+    private suspend fun handleXtwapUrl(url: String, callback: (ExtractorLink) -> Unit) {
+        try {
+            val html = app.get(url, referer = "$mainUrl/").text
+            val m3u8 = Regex("""https?://[^\s"'<>]+\.m3u8[^\s"'<>]*""").find(html)?.value
+            if (m3u8 != null) {
+                callback(
+                    newExtractorLink("XTWAP", "XTWAP HLS", m3u8, type = ExtractorLinkType.M3U8) {
+                        this.referer = "https://play.xtwap.top/"
+                    }
+                )
+            }
+            val directSrc = Regex("""<source[^>]+src=["']([^"']+)["']""").find(html)?.groupValues?.getOrNull(1)
+            if (directSrc != null && directSrc.startsWith("http")) {
+                callback(
+                    newExtractorLink("BTube", "BTube Direct", directSrc, type = ExtractorLinkType.VIDEO) {
+                        this.referer = "https://play.xtwap.top/"
+                    }
+                )
+            }
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun handleVkspeedUrl(url: String, callback: (ExtractorLink) -> Unit) {
+        try {
+            val html = app.get(url, referer = "$mainUrl/").text
+            val unpacked = getPacked(html) ?: html
+            val mp4s = Regex("""https?://[^\s"'<>]+\.mp4[^\s"'<>]*""").findAll(unpacked).map { it.value }.toList()
+            mp4s.forEach { mp4 ->
+                callback(
+                    newExtractorLink("VKSpeed", "VKSpeed MP4", mp4, type = ExtractorLinkType.VIDEO) {
+                        this.referer = "https://vkspeed.com/"
+                    }
+                )
+            }
+            val m3u8s = Regex("""https?://[^\s"'<>]+\.m3u8[^\s"'<>]*""").findAll(unpacked).map { it.value }.toList()
+            m3u8s.forEach { m3u8 ->
+                callback(
+                    newExtractorLink("VKSpeed", "VKSpeed HLS", m3u8, type = ExtractorLinkType.M3U8) {
+                        this.referer = "https://vkspeed.com/"
+                    }
+                )
+            }
+        } catch (_: Exception) {}
     }
 
     private suspend fun handleBloggerUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {

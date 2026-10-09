@@ -248,7 +248,7 @@ class MovieBox : MainAPI() {
             }
         }
 
-        return newMovieLoadResponse(title, url, tvType, "$mainUrl/movies/$detailPath?id=$subjectId&type=/movie/detail&detailSe=&detailEp=&lang=en") {
+        return newMovieLoadResponse(title, url, tvType, "$mainUrl/movies/$detailPath?id=$subjectId&type=/movie/detail&detailSe=0&detailEp=0&lang=en") {
             this.posterUrl = poster
             this.plot = plot
             this.tags = tags
@@ -265,8 +265,8 @@ class MovieBox : MainAPI() {
     ): Boolean {
         val detailPath = detailPathFromUrl(data)
         val sid = Regex("[?&](sid|id)=([^&]+)").find(data)?.groupValues?.getOrNull(2)
-        val se = Regex("[?&]se=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
-        val ep = Regex("[?&]ep=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
+        val se = Regex("[?&](?:se|detailSe)=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
+        val ep = Regex("[?&](?:ep|detailEp)=(\\d+)").find(data)?.groupValues?.getOrNull(1) ?: "0"
 
         val detRaw = apiGetWithToken("/wefeed-h5api-bff/detail?detailPath=$detailPath")
         val detRoot = tryParseJson<Map<String, Any?>>(detRaw)
@@ -284,24 +284,23 @@ class MovieBox : MainAPI() {
             listOf(mapOf<String, Any?>("subjectId" to subjectId, "lanName" to "Original"))
         }
 
-        val headers = mapOf(
-            "Accept" to "application/json",
-            "User-Agent" to USER_AGENT,
-            "Authorization" to "",
-            "X-Client-Info" to "{\"timezone\":\"Asia/Jakarta\"}",
-            "X-Request-Lang" to "en",
-            "X-Client-Token" to clientTimeToken(),
-            "Referer" to "$mainUrl/movies/$detailPath"
-        )
-
         var found = false
 
         for (dub in allDubs) {
             val dubId = dub["subjectId"]?.toString() ?: continue
             val dubName = dub["lanName"]?.toString() ?: "Unknown"
 
+            val spaReferer = "https://123movienow.cc/spa/videoPlayPage/movies/$detailPath?id=$dubId&type=/movie/detail&detailSe=$se&detailEp=$ep&lang=en"
+            val headers = mapOf(
+                "Accept" to "application/json",
+                "User-Agent" to USER_AGENT,
+                "X-Client-Info" to "{\"timezone\":\"Asia/Jakarta\"}",
+                "X-Vip-Restrict" to "0",
+                "Referer" to spaReferer
+            )
+
             val playRaw = app.get(
-                "$mainUrl/wefeed-h5api-bff/subject/play?subjectId=$dubId&se=$se&ep=$ep&detailPath=$detailPath",
+                "$apiBase/wefeed-h5api-bff/subject/play?subjectId=$dubId&se=$se&ep=$ep&detailPath=$detailPath&streamSignType=0",
                 headers = headers
             ).text
 
@@ -332,7 +331,7 @@ class MovieBox : MainAPI() {
 
                 callback(newExtractorLink(name, label, u) {
                     this.quality = q
-                    this.referer = "$mainUrl/"
+                    this.referer = "https://123movienow.cc/"
                 })
                 found = true
 

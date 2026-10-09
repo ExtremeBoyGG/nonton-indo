@@ -1,6 +1,8 @@
 package com.indo
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
+import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
@@ -24,8 +26,9 @@ class Sokuja : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/anime/?order=update" to "Anime Terbaru",
+        "$mainUrl/" to "Anime Populer",
         "$mainUrl/anime/?status=ongoing&order=update" to "Sedang Tayang (Ongoing)",
+        "$mainUrl/anime/?order=update" to "Anime Terbaru",
         "$mainUrl/anime/?status=completed&order=update" to "Tamat (Completed)",
         "$mainUrl/anime/?type=movie&order=update" to "Anime Movie"
     )
@@ -85,7 +88,11 @@ class Sokuja : MainAPI() {
         val url = if (page <= 1) {
             request.data
         } else {
-            "${request.data}&page=$page"
+            if (request.data == "$mainUrl/") {
+                "$mainUrl/anime/?order=update&page=$page"
+            } else {
+                "${request.data}&page=$page"
+            }
         }
         val doc = app.get(url, headers = headers).document
         val items = doc.select("a.group.block[href*='/anime/'], div.grid a[href*='/anime/']")
@@ -131,14 +138,26 @@ class Sokuja : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url, headers = headers).document
+        var finalUrl = url
+        var doc = app.get(finalUrl, headers = headers).document
+
+        // If an episode page was opened directly, resolve to series page
+        if (!finalUrl.contains("/anime/")) {
+            val seriesHref = doc.selectFirst("a[href*='/anime/']:contains(Semua Episode), nav a[href*='/anime/'], a[href*='/anime/']:not([href*='list-mode']):not([href*='order='])")?.attr("href")
+            if (!seriesHref.isNullOrBlank()) {
+                finalUrl = fixUrl(seriesHref)
+                doc = app.get(finalUrl, headers = headers).document
+            }
+        }
+
         val rawHtml = doc.html()
 
         val title = doc.selectFirst("h1")?.text()?.trim()
             ?.replace(Regex("\\s*Subtitle Indonesia.*", RegexOption.IGNORE_CASE), "")
             ?.trim() ?: "Anime"
 
-        val poster = doc.selectFirst("img.object-cover, div[class*='aspect-'] img, img[alt]")?.let { extractPoster(it) }
+        val poster = doc.selectFirst("meta[property=og:image]")?.attr("content")?.ifBlank { null }
+            ?: doc.selectFirst("img.object-cover, div[class*='aspect-'] img, img[alt]")?.let { extractPoster(it) }
         val description = doc.selectFirst("div.rounded-xl p, p.synopsis")?.text()?.trim()
             ?: doc.selectFirst("meta[name=description]")?.attr("content")
 
@@ -152,7 +171,7 @@ class Sokuja : MainAPI() {
         val score = doc.selectFirst("span.text-yellow-400")?.text()
             ?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
 
-        val isMovie = url.contains("movie", true) ||
+        val isMovie = finalUrl.contains("movie", true) ||
             doc.selectFirst("span.uppercase, nav")?.text()?.contains("MOVIE", true) == true
 
         val epJsonRegex = Regex("""\\?"id\\?":\s*(\d+),\s*\\?"slug\\?":\s*\\?"([^\\"]+)\\?",\s*\\?"title\\?":\s*\\?"([^\\"]+)\\?",\s*\\?"episodeNumber\\?":\s*(\d+)""")
@@ -174,7 +193,7 @@ class Sokuja : MainAPI() {
                 }
             }.distinctBy { it.data }.sortedBy { it.episode }
         } else {
-            doc.select("div.space-y-1 a[href*='-episode-'], a[href*='-episode-']").mapNotNull { a ->
+            doc.select("div.space-y-1 a, a[href*='-episode-']").mapNotNull { a ->
                 val href = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
                 val epText = a.selectFirst("span")?.text()?.trim() ?: a.text().trim()
                 val epNum = Regex("""(?:episode|ep)\s*(\d+)""", RegexOption.IGNORE_CASE)
@@ -188,24 +207,32 @@ class Sokuja : MainAPI() {
             }.distinctBy { it.data }.sortedBy { it.episode }
         }
 
-        if (isMovie || episodes.size <= 1) {
-            val streamData = if (episodes.isNotEmpty()) episodes.first().data else url
-            return newMovieLoadResponse(title, url, TvType.AnimeMovie, streamData) {
-                this.posterUrl = poster
+        val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), year, true)
+
+        if (isMovie) {
+            val streamData = if (episodes.isNotEmpty()) episodes.first().data else finalUrl
+            return newMovieLoadResponse(title, finalUrl, TvType.AnimeMovie, streamData) {
+                this.posterUrl = tracker?.image ?: poster
+                this.backgroundPosterUrl = tracker?.cover ?: poster
                 this.plot = description
                 this.tags = genres
                 this.year = year
                 score?.let { this.score = Score.from10(it) }
+                addMalId(tracker?.malId)
+                addAniListId(tracker?.aniId?.toIntOrNull())
             }
         }
 
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.posterUrl = poster
+        return newAnimeLoadResponse(title, finalUrl, TvType.Anime) {
+            this.posterUrl = tracker?.image ?: poster
+            this.backgroundPosterUrl = tracker?.cover ?: poster
             this.plot = description
             this.tags = genres
             this.year = year
             score?.let { this.score = Score.from10(it) }
             addEpisodes(DubStatus.Subbed, episodes)
+            addMalId(tracker?.malId)
+            addAniListId(tracker?.aniId?.toIntOrNull())
         }
     }
 
