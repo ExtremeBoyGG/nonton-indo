@@ -5,6 +5,9 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.M3u8Helper
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Document
@@ -199,19 +202,41 @@ class Donghub : MainAPI() {
         }
     }
 
-    private suspend fun extractStream(
-        url: String,
-        ref: String,
-        subtitleCallback: (SubtitleFile) -> Unit,
+    private suspend fun extractDailymotion(
+        videoId: String,
         callback: (ExtractorLink) -> Unit
     ) {
-        val dmId = Regex("""(?:dailymotion\.com/(?:video/|player/[^?]+\.html\?video=)|dai\.ly/|geo\.dailymotion\.com/player/[^?]+\.html\?video=)([a-zA-Z0-9]+)""").find(url)?.groupValues?.getOrNull(1)
-        if (dmId != null) {
-            loadExtractor("https://www.dailymotion.com/video/$dmId", ref, subtitleCallback, callback)
-            return
-        }
+        try {
+            val apiUrl = "https://www.dailymotion.com/player/metadata/video/$videoId"
+            val metaText = app.get(
+                apiUrl,
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer" to "https://geo.dailymotion.com/"
+                )
+            ).text
 
-        loadExtractor(url, ref, subtitleCallback, callback)
+            val m3u8Url = Regex(""""type":\s*"application/x-mpegURL",\s*"url":\s*"([^"]+)"""").find(metaText)?.groupValues?.getOrNull(1)
+                ?: Regex(""""url":\s*"([^"]+\.m3u8[^"]*)"""").find(metaText)?.groupValues?.getOrNull(1)
+                ?: return
+
+            val links = M3u8Helper.generateM3u8(
+                source = "Dailymotion",
+                streamUrl = m3u8Url,
+                referer = "https://www.dailymotion.com/",
+                headers = mapOf("Referer" to "https://www.dailymotion.com/")
+            )
+            if (links.isNotEmpty()) {
+                links.forEach { callback(it) }
+            } else {
+                callback(
+                    newExtractorLink("Dailymotion", "Dailymotion", m3u8Url) {
+                        this.referer = "https://www.dailymotion.com/"
+                        this.type = ExtractorLinkType.M3U8
+                    }
+                )
+            }
+        } catch (_: Exception) { }
     }
 
     override suspend fun loadLinks(
@@ -221,10 +246,23 @@ class Donghub : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val doc = app.get(data, headers = defaultHeaders).document
+        val seenDm = mutableSetOf<String>()
+
+        suspend fun handleUrl(url: String) {
+            val dmId = Regex("""(?:dailymotion\.com/(?:video/|player/[^?]+\.html\?video=)|dai\.ly/|geo\.dailymotion\.com/player/[^?]+\.html\?video=)([a-zA-Z0-9]+)""").find(url)?.groupValues?.getOrNull(1)
+            if (dmId != null) {
+                if (seenDm.add(dmId)) {
+                    extractDailymotion(dmId, callback)
+                }
+                return
+            }
+
+            loadExtractor(url, data, subtitleCallback, callback)
+        }
 
         doc.select("#pembed iframe[src]").forEach { iframe ->
             val src = iframe.attr("src").ifBlank { return@forEach }
-            extractStream(src, data, subtitleCallback, callback)
+            handleUrl(src)
         }
 
         doc.select("select.mirror option").forEach { option ->
@@ -234,7 +272,7 @@ class Donghub : MainAPI() {
                 val decoded = String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT))
                 val iframeSrc = Regex("""iframe\s+[^>]*src\s*=\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(decoded)?.groupValues?.getOrNull(1)
                 if (iframeSrc != null) {
-                    extractStream(iframeSrc, data, subtitleCallback, callback)
+                    handleUrl(iframeSrc)
                 }
             } catch (_: Exception) { }
         }
