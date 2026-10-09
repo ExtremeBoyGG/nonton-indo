@@ -43,34 +43,35 @@
 ### Anime
 
 | Plugin | Situs | Status |
-|--------|-------|--------|
+|---|---|---|
 | <img src="https://www.google.com/s2/favicons?domain=anime-indo.lol&sz=16" width="16" height="16"> AnimeIndo | anime-indo.lol | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=oploverz.ch&sz=16" width="16" height="16"> Oploverz | oploverz.ch | Development |
-| <img src="https://www.google.com/s2/favicons?domain=otakudesu.blog&sz=16" width="16" height="16"> Otakudesu | otakudesu.blog | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=anichin.moe&sz=16" width="16" height="16"> Anichin | anichin.moe | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=donghive.vip&sz=16" width="16" height="16"> Donghub | donghive.vip | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=v20.kuramanime.ing&sz=16" width="16" height="16"> Kuramanime | v20.kuramanime.ing | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=nimegami.id&sz=16" width="16" height="16"> Nimegami | nimegami.id | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=animasuid.com&sz=16" width="16" height="16"> Animasu | animasuid.com | Development |
-| <img src="https://www.google.com/s2/favicons?domain=kuramanime.ink&sz=16" width="16" height="16"> Kuramanime | kuramanime.ink | Development |
-| <img src="https://www.google.com/s2/favicons?domain=v2.samehadaku.how&sz=16" width="16" height="16"> Samehadaku | v2.samehadaku.how | Development |
-| <img src="https://www.google.com/s2/favicons?domain=donghub.vip&sz=16" width="16" height="16"> Donghub | donghub.vip | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=anichin.cafe&sz=16" width="16" height="16"> Anichin | anichin.cafe | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=kuramanime.ink&sz=16" width="16" height="16"> Kuronime | kuronime.ink | Development |
+| <img src="https://www.google.com/s2/favicons?domain=otakudesu.blog&sz=16" width="16" height="16"> Otakudesu | otakudesu.blog | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=x6.sokuja.uk&sz=16" width="16" height="16"> Sokuja | x6.sokuja.uk | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=animasuid.com&sz=16" width="16" height="16"> Animasu | animasuid.com | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=kuronime.sbs&sz=16" width="16" height="16"> Kuronime | kuronime.sbs | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=oploverz.ch&sz=16" width="16" height="16"> Oploverz | oploverz.ch | ⚠️ Development |
 
-### Film & Drama
+### Film & Series
 
 | Plugin | Situs | Status |
-|--------|-------|--------|
+|---|---|---|
+| <img src="https://www.google.com/s2/favicons?domain=sweetiepieparenting.com&sz=16" width="16" height="16"> Idlix | sweetiepieparenting.com | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=tv12.lk21official.cc&sz=16" width="16" height="16"> LK21 | tv12.lk21official.cc | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=themoviebox.org&sz=16" width="16" height="16"> MovieBox | themoviebox.org | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=pahe.ink&sz=16" width="16" height="16"> Pahe | pahe.ink | Development |
-| <img src="https://www.google.com/s2/favicons?domain=rebahin&sz=16" width="16" height="16"> Rebahin | rebahin | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=idlix&sz=16" width="16" height="16"> Idlix | idlix | Development |
+| <img src="https://www.google.com/s2/favicons?domain=pahe.ink&sz=16" width="16" height="16"> Pahe | pahe.ink | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=159.89.250.250&sz=16" width="16" height="16"> Rebahin | 159.89.250.250 | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=167.71.237.49&sz=16" width="16" height="16"> SemiRebahin | 167.71.237.49 | ⚠️ Development |
 
 ### Lainnya
 
 | Plugin | Situs | Status |
-|--------|-------|--------|
-| <img src="https://www.google.com/s2/favicons?domain=nekopoi.care&sz=16" width="16" height="16"> Nekopoi | nekopoi.care | ✅ Stable |
+|---|---|---|
 | <img src="https://www.google.com/s2/favicons?domain=hanime.tv&sz=16" width="16" height="16"> Hanime | hanime.tv | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=167.71.237.49&sz=16" width="16" height="16"> SemiRebahin | 167.71.237.49 | Development |
+| <img src="https://www.google.com/s2/favicons?domain=nekopoi.care&sz=16" width="16" height="16"> Nekopoi | nekopoi.care | ✅ Stable |
 
 ---
 
