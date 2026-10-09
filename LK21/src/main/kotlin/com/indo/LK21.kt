@@ -158,8 +158,7 @@ class LK21 : MainAPI() {
                     this.quality = q
                     this.referer = "https://abyssplayer.com/"
                     this.headers = mapOf(
-                        "Referer" to "https://abyssplayer.com/",
-                        "Origin" to "https://abyssplayer.com"
+                        "Referer" to "https://abyssplayer.com/"
                     )
                 }
                 parsedSources.add(Pair(link, q))
