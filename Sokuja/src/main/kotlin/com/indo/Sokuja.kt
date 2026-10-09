@@ -26,11 +26,11 @@ class Sokuja : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/" to "Anime Populer",
-        "$mainUrl/anime/?status=ongoing&order=update" to "Sedang Tayang (Ongoing)",
-        "$mainUrl/anime/?order=update" to "Anime Terbaru",
-        "$mainUrl/anime/?status=completed&order=update" to "Tamat (Completed)",
-        "$mainUrl/anime/?type=movie&order=update" to "Anime Movie"
+        "$mainUrl/?page=" to "Update Terbaru",
+        "$mainUrl/anime/?status=ongoing&order=update&page=" to "Sedang Tayang (Ongoing)",
+        "$mainUrl/anime/?order=update&page=" to "Anime Terbaru",
+        "$mainUrl/anime/?status=completed&order=update&page=" to "Tamat (Completed)",
+        "$mainUrl/anime/?type=movie&order=update&page=" to "Anime Movie"
     )
 
     private fun parseQuality(format: String?): Int {
@@ -62,6 +62,41 @@ class Sokuja : MainAPI() {
         }
     }
 
+    private fun toUpdateSearchResponse(element: Element, postersMap: Map<String, String>): SearchResponse? {
+        val href = element.attr("href").ifBlank { null } ?: return null
+        val epSlug = href.trim('/').substringAfterLast('/')
+        if (epSlug.isBlank() || epSlug.contains("list-mode")) return null
+
+        val cleanAnimeSlug = if (epSlug.contains("-episode-")) {
+            epSlug.replace(Regex("-episode-\\d+-"), "-")
+        } else {
+            epSlug
+        }
+
+        val animeUrl = fixUrl("/anime/$cleanAnimeSlug/")
+
+        val title = element.selectFirst("h3, h2")?.text()?.trim()
+            ?: element.selectFirst("img")?.attr("alt")?.trim()
+            ?: return null
+        if (title.isBlank()) return null
+
+        val epText = element.selectFirst("span:contains(EP), span:contains(Episode), div.flex span")?.text()?.trim()
+        val epNum = Regex("""(?:EP|Episode)\s*<!--\s*-->\s*(\d+)""", RegexOption.IGNORE_CASE).find(element.html())?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: Regex("""(?:EP|Episode)\s*(\d+)""", RegexOption.IGNORE_CASE).find(epText.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: Regex("""-episode-(\d+)""").find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+        val baseSlug = cleanAnimeSlug.replace("-subtitle-indonesia", "")
+        val verticalPoster = postersMap[cleanAnimeSlug]
+            ?: postersMap[baseSlug]
+            ?: postersMap.entries.firstOrNull { it.key.contains(baseSlug) }?.value
+            ?: extractPoster(element)
+
+        return newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
+            this.posterUrl = verticalPoster?.let { fixUrl(it) }
+            addSub(epNum)
+        }
+    }
+
     private fun toSearchResponse(element: Element): SearchResponse? {
         val link = if (element.tagName() == "a") element else element.selectFirst("a[href*='/anime/']") ?: return null
         val href = fixUrlNull(link.attr("href")) ?: return null
@@ -86,15 +121,42 @@ class Sokuja : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) {
-            request.data
+            if (request.data.startsWith("$mainUrl/?page=")) {
+                "$mainUrl/"
+            } else if (request.data.endsWith("page=")) {
+                "${request.data}1"
+            } else {
+                request.data
+            }
         } else {
-            if (request.data == "$mainUrl/") {
-                "$mainUrl/anime/?order=update&page=$page"
+            if (request.data.endsWith("page=")) {
+                "${request.data}$page"
             } else {
                 "${request.data}&page=$page"
             }
         }
         val doc = app.get(url, headers = headers).document
+
+        if (request.name == "Update Terbaru") {
+            val postersMap = mutableMapOf<String, String>()
+            doc.select("a[href*='/anime/']").forEach { a ->
+                val href = a.attr("href").trimEnd('/')
+                val slug = href.substringAfterLast('/')
+                if (slug.isNotBlank() && !slug.contains("list-mode") && !slug.contains("order=")) {
+                    val p = extractPoster(a)
+                    if (!p.isNullOrBlank()) {
+                        postersMap[slug] = p
+                    }
+                }
+            }
+
+            val utSection = doc.selectFirst("section:has(h2:contains(Update Terbaru))")
+            val cards = utSection?.select("a.group.block") ?: doc.select("a.group.block[href*='-episode-']")
+            val items = cards.mapNotNull { toUpdateSearchResponse(it, postersMap) }
+                .distinctBy { it.url }
+            return newHomePageResponse(request.name, items)
+        }
+
         val items = doc.select("a.group.block[href*='/anime/'], div.grid a[href*='/anime/']")
             .mapNotNull { toSearchResponse(it) }
             .distinctBy { it.url }
@@ -165,14 +227,11 @@ class Sokuja : MainAPI() {
             .filter { it.isNotBlank() }.distinct()
 
         val year = Regex("""\b(19\d\d|20\d\d)\b""").find(
-            doc.selectFirst("div.flex.flex-wrap, nav")?.text().orEmpty()
+            doc.select("div.flex:has(dt:contains(Tahun)) dd, div.flex.flex-wrap").text()
         )?.groupValues?.getOrNull(1)?.toIntOrNull()
 
         val score = doc.selectFirst("span.text-yellow-400")?.text()
             ?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
-
-        val isMovie = finalUrl.contains("movie", true) ||
-            doc.selectFirst("span.uppercase, nav")?.text()?.contains("MOVIE", true) == true
 
         val epJsonRegex = Regex("""\\?"id\\?":\s*(\d+),\s*\\?"slug\\?":\s*\\?"([^\\"]+)\\?",\s*\\?"title\\?":\s*\\?"([^\\"]+)\\?",\s*\\?"episodeNumber\\?":\s*(\d+)""")
         val jsonMatches = epJsonRegex.findAll(rawHtml).toList()
@@ -206,6 +265,9 @@ class Sokuja : MainAPI() {
                 }
             }.distinctBy { it.data }.sortedBy { it.episode }
         }
+
+        val typeText = doc.select("dt:contains(Tipe) + dd, dt:contains(Type) + dd").text().trim()
+        val isMovie = episodes.size <= 1 && (typeText.contains("Movie", true) || (typeText.isBlank() && finalUrl.contains("-movie-", true)))
 
         val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(TvType.Anime), year, true)
 
