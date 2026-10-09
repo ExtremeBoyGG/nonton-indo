@@ -138,7 +138,7 @@ class Sokuja : MainAPI() {
             ?.replace(Regex("\\s*Subtitle Indonesia.*", RegexOption.IGNORE_CASE), "")
             ?.trim() ?: "Anime"
 
-        val poster = doc.selectFirst("div.relative.aspect-\\[3/4\\] img, img.object-cover, img[alt]")?.let { extractPoster(it) }
+        val poster = doc.selectFirst("img.object-cover, div[class*='aspect-'] img, img[alt]")?.let { extractPoster(it) }
         val description = doc.selectFirst("div.rounded-xl p, p.synopsis")?.text()?.trim()
             ?: doc.selectFirst("meta[name=description]")?.attr("content")
 

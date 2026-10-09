@@ -10,12 +10,17 @@ import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Document
 
 class Donghub : MainAPI() {
-    override var mainUrl = "https://donghub.vip"
+    override var mainUrl = "https://donghive.vip"
     override var name = "Donghub"
     override val hasMainPage = true
     override var lang = "id"
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.TvSeries)
+
+    private val defaultHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/"
+    )
 
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Popular Today",
@@ -45,6 +50,7 @@ class Donghub : MainAPI() {
 
             newAnimeSearchResponse(title, href, tvType) {
                 this.posterUrl = poster
+                this.posterHeaders = defaultHeaders
                 addSub(epNum)
             }
         }.distinctBy { it.url }
@@ -52,18 +58,19 @@ class Donghub : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (request.name == "Popular Today") {
-            val doc = app.get(mainUrl).document
+            val doc = app.get(mainUrl, headers = defaultHeaders).document
             val items = parseItems(doc, ".listupd.popularslider article.bs")
             return newHomePageResponse(request.name, items)
         }
 
-        val doc = app.get(if (page > 1) "$mainUrl/page/$page/" else mainUrl).document
+        val url = if (page > 1) "$mainUrl/page/$page/" else mainUrl
+        val doc = app.get(url, headers = defaultHeaders).document
         val items = parseItems(doc, ".listupd.normal article.bs")
         return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = app.get("$mainUrl/?s=$query").document
+        val doc = app.get("$mainUrl/?s=$query", headers = defaultHeaders).document
         return parseItems(doc, "div.listupd article.bs")
     }
 
@@ -74,61 +81,21 @@ class Donghub : MainAPI() {
         return "$mainUrl/$seriesSlug/"
     }
 
+    private suspend fun resolveSeriesUrl(url: String): String {
+        if (!url.contains("-episode-", ignoreCase = true)) return url
+        try {
+            val doc = app.get(url, headers = defaultHeaders).document
+            val breadcrumbLink = doc.select(".ts-breadcrumb a[itemprop=item], .breadcrumb a")
+                .map { it.attr("href") }
+                .firstOrNull { it.isNotBlank() && !it.equals("$mainUrl/", ignoreCase = true) && !it.equals(url, ignoreCase = true) }
+            if (!breadcrumbLink.isNullOrBlank()) return breadcrumbLink
+        } catch (_: Exception) {}
+        return episodeToSeriesUrl(url) ?: url
+    }
+
     override suspend fun load(url: String): LoadResponse {
-        val isEpisode = url.contains("-episode-", ignoreCase = true)
-        val seriesUrl = if (isEpisode) episodeToSeriesUrl(url) else null
-
-        val animeUrl = seriesUrl ?: url
-
-        if (isEpisode && seriesUrl != null) {
-            val episodeDoc = app.get(url).document
-            val title = episodeDoc.selectFirst("h1.entry-title")?.text()?.trim()
-                ?: throw ErrorLoadingException("Title not found")
-            val poster = episodeDoc.selectFirst(".single-info .thumb img")?.attr("src")
-                ?: episodeDoc.selectFirst(".thumb img")?.attr("src")
-                ?: episodeDoc.selectFirst("meta[property=og:image]")?.attr("content")
-            val synopsis = episodeDoc.select(".desc p, .entry-content p").text().trim().ifBlank { null }
-            val tags = episodeDoc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
-
-            val slug = animeUrl.trimEnd('/').substringAfterLast("/")
-            val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1&_fields=id").text
-            val catList = tryParseJson<List<Map<String, Any?>>>(catRaw)
-            val categoryId = catList?.firstOrNull()?.get("id")?.toString()
-
-            val episodes = mutableListOf<Episode>()
-            if (categoryId != null) {
-                var apiPage = 1
-                while (true) {
-                    val postRaw = app.get("$mainUrl/wp-json/wp/v2/posts?categories=$categoryId&per_page=100&page=$apiPage&_fields=id,title,link").text
-                    val posts = tryParseJson<List<Map<String, Any?>>>(postRaw) ?: break
-                    if (posts.isEmpty()) break
-                    posts.forEach { post ->
-                        val epHref = post["link"]?.toString() ?: return@forEach
-                        val titleObj = post["title"] as? Map<*, *>
-                        val epTitle = titleObj?.get("rendered")?.toString()?.ifBlank { null } ?: return@forEach
-                        val epNum = Regex("""(?:Episode|Ep|E)\s*(\d+)""", RegexOption.IGNORE_CASE).find(epTitle)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                        episodes.add(newEpisode(epHref) {
-                            this.name = epTitle
-                            this.episode = epNum
-                            this.posterUrl = poster
-                        })
-                    }
-                    if (posts.size < 100) break
-                    apiPage++
-                }
-            }
-
-            return newAnimeLoadResponse(title, animeUrl, TvType.Anime) {
-                engName = title
-                posterUrl = poster
-                addEpisodes(DubStatus.Subbed, episodes)
-                plot = synopsis
-                this.tags = tags
-            }
-        }
-
-        // Series detail page
-        val doc = app.get(animeUrl).document
+        val animeUrl = resolveSeriesUrl(url)
+        val doc = app.get(animeUrl, headers = defaultHeaders).document
         val title = doc.selectFirst("h1.entry-title")?.text()?.trim()
             ?: doc.selectFirst(".infolimit h2")?.text()?.trim()
             ?: throw ErrorLoadingException("Title not found")
@@ -141,7 +108,7 @@ class Donghub : MainAPI() {
         val tags = doc.select(".genxed a").mapNotNull { it.text().trim().ifBlank { null } }
 
         val slug = animeUrl.trimEnd('/').substringAfterLast("/")
-        val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1&_fields=id").text
+        val catRaw = app.get("$mainUrl/wp-json/wp/v2/categories?slug=$slug&per_page=1&_fields=id", headers = defaultHeaders).text
         val catList = tryParseJson<List<Map<String, Any?>>>(catRaw)
         val categoryId = catList?.firstOrNull()?.get("id")?.toString()
 
@@ -149,7 +116,10 @@ class Donghub : MainAPI() {
         if (categoryId != null) {
             var apiPage = 1
             while (true) {
-                val postRaw = app.get("$mainUrl/wp-json/wp/v2/posts?categories=$categoryId&per_page=100&page=$apiPage&_fields=id,title,link").text
+                val postRaw = app.get(
+                    "$mainUrl/wp-json/wp/v2/posts?categories=$categoryId&per_page=100&page=$apiPage&_fields=id,title,link",
+                    headers = defaultHeaders
+                ).text
                 val posts = tryParseJson<List<Map<String, Any?>>>(postRaw) ?: break
                 if (posts.isEmpty()) break
                 posts.forEach { post ->
@@ -168,20 +138,62 @@ class Donghub : MainAPI() {
             }
         }
 
+        if (episodes.isEmpty()) {
+            doc.select(".eplister ul li a").forEach { a ->
+                val epHref = a.attr("href").ifBlank { return@forEach }
+                val epTitle = a.selectFirst(".epl-title")?.text()?.trim() ?: a.text().trim()
+                val epNum = a.selectFirst(".epl-num")?.text()?.toIntOrNull()
+                    ?: Regex("""(?:Episode|Ep|E)\s*(\d+)""", RegexOption.IGNORE_CASE).find(epTitle)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                episodes.add(newEpisode(epHref) {
+                    this.name = epTitle
+                    this.episode = epNum
+                    this.posterUrl = poster
+                })
+            }
+        }
+
+        if (episodes.isEmpty() && url.contains("-episode-", ignoreCase = true)) {
+            episodes.add(newEpisode(url) {
+                this.name = title
+                this.episode = Regex("""(?:Episode|Ep|E)\s*(\d+)""", RegexOption.IGNORE_CASE).find(title)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+                this.posterUrl = poster
+            })
+        }
+
         episodes.sortBy { it.episode }
+
+        val seasonDataList = mutableListOf<SeasonData>()
+        if (episodes.size > 10) {
+            val chunks = episodes.chunked(10)
+            chunks.forEachIndexed { index, chunk ->
+                val seasonNum = index + 1
+                val firstEp = chunk.first().episode ?: (index * 10 + 1)
+                val lastEp = chunk.last().episode ?: ((index + 1) * 10)
+                val sName = "Episode $firstEp - $lastEp"
+                seasonDataList.add(SeasonData(seasonNum, sName))
+                chunk.forEach { ep ->
+                    ep.season = seasonNum
+                }
+            }
+        }
 
         if (episodes.isNotEmpty()) {
             return newAnimeLoadResponse(title, animeUrl, TvType.Anime) {
-                engName = title
-                posterUrl = poster
+                this.engName = title
+                this.posterUrl = poster
+                this.posterHeaders = defaultHeaders
+                if (seasonDataList.isNotEmpty()) {
+                    this.seasonNames = seasonDataList
+                }
                 addEpisodes(DubStatus.Subbed, episodes)
-                plot = synopsis
+                this.plot = synopsis
                 this.tags = tags
             }
         }
 
         return newMovieLoadResponse(title, animeUrl, TvType.Anime, animeUrl) {
             this.posterUrl = poster
+            this.posterHeaders = defaultHeaders
             this.plot = synopsis
             this.tags = tags
         }
@@ -193,7 +205,7 @@ class Donghub : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data).document
+        val doc = app.get(data, headers = defaultHeaders).document
 
         doc.select("#pembed iframe[src]").forEach { iframe ->
             val src = iframe.attr("src").ifBlank { return@forEach }

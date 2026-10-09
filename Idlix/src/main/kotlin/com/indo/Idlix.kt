@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.JsonAsString
 import kotlinx.coroutines.delay
@@ -272,12 +273,26 @@ class Idlix : MainAPI() {
         }
         if (slug.isBlank()) return false
 
+        val pageUrl = if (contentType == "movie") "$mainUrl/movie/$slug"
+        else if (extra.containsKey("season")) "$mainUrl/series/$slug/season/${extra["season"]}/episode/${extra["episode"]}"
+        else "$mainUrl/series/$slug"
+
+        var cookieHeader = emptyMap<String, String>()
+        try {
+            val pageResp = app.get(pageUrl, interceptor = cfKiller)
+            val setCookie = pageResp.headers["set-cookie"].orEmpty()
+            val did = Regex("""\bdid=([^;]+)""").find(setCookie)?.groupValues?.getOrNull(1)
+            if (!did.isNullOrBlank()) {
+                cookieHeader = mapOf("Cookie" to "did=$did")
+            }
+        } catch (_: Exception) {}
+
         val contentId: String
         try {
             val apiPath = if (contentType == "movie") "api/movies/$slug"
             else if (extra.containsKey("season")) "api/series/$slug/season/${extra["season"]}/episode/${extra["episode"]}"
             else "api/series/$slug"
-            val detailResp = app.get("$mainUrl/$apiPath", headers = apiHeaders, interceptor = cfKiller)
+            val detailResp = app.get("$mainUrl/$apiPath", headers = apiHeaders + mapOf("Referer" to "$pageUrl/") + cookieHeader, interceptor = cfKiller)
             val detailJson = JSONObject(detailResp.text ?: return false)
             contentId = detailJson.optJSONObject("episode")?.optString("id", "")?.ifBlank { null }
                 ?: detailJson.optString("id", "")
@@ -292,7 +307,7 @@ class Idlix : MainAPI() {
             val playInfoType = if (extra.containsKey("season")) "episode" else contentType
             val playInfoResp = app.get(
                 "$mainUrl/api/watch/play-info/$playInfoType/$contentId",
-                headers = apiHeaders,
+                headers = apiHeaders + mapOf("Referer" to "$pageUrl/") + cookieHeader,
                 interceptor = cfKiller
             )
             val playInfo = JSONObject(playInfoResp.text ?: return false)
@@ -307,12 +322,12 @@ class Idlix : MainAPI() {
                 if (waitMs > 0) delay(waitMs + 2000)
             }
 
-            var claimJson = postClaim(gateToken)
+            var claimJson = postClaim(gateToken, pageUrl, cookieHeader)
 
             if (claimJson.optString("kind") == "pending") {
                 val remainingMs = claimJson.optLong("remainingMs", 0)
                 if (remainingMs > 0) delay(remainingMs + 2000)
-                claimJson = postClaim(gateToken)
+                claimJson = postClaim(gateToken, pageUrl, cookieHeader)
             }
 
             val redeemUrl = claimJson.optString("redeemUrl", "")
@@ -323,6 +338,11 @@ class Idlix : MainAPI() {
                 try {
                     val pentosResp = app.post(
                         redeemUrl,
+                        headers = mapOf(
+                            "Origin" to mainUrl,
+                            "Referer" to "$mainUrl/",
+                            "Content-Type" to "application/json"
+                        ),
                         json = JsonAsString("""{"claim":"$claim"}""")
                     )
                     val pentosText = pentosResp.text ?: ""
@@ -332,7 +352,7 @@ class Idlix : MainAPI() {
                     subtitles = if (subsArray != null) {
                         (0 until subsArray.length()).mapNotNull { i ->
                             val sub = subsArray.optJSONObject(i) ?: return@mapNotNull null
-                            val lang = sub.optString("lang", "")
+                            val lang = sub.optString("label").ifBlank { sub.optString("lang", "") }
                             val path = sub.optString("path", "")
                             if (lang.isNotBlank() && path.isNotBlank()) Pair(lang, path) else null
                         }
@@ -340,9 +360,9 @@ class Idlix : MainAPI() {
                 } catch (_: Exception) {}
                 if (streamUrl != null) {
                     subtitles.forEach { (lang, path) ->
-                        subtitleCallback(SubtitleFile(lang, path))
+                        subtitleCallback(newSubtitleFile(lang, path))
                     }
-                    callback(newExtractorLink("Idlix", "Idlix", streamUrl) {
+                    callback(newExtractorLink("Idlix", "Idlix", streamUrl, type = ExtractorLinkType.M3U8) {
                         this.referer = "$mainUrl/"
                     })
                     return true
@@ -350,7 +370,7 @@ class Idlix : MainAPI() {
             }
 
             if (initialMaster.isNotBlank()) {
-                callback(newExtractorLink("Idlix", "Idlix", initialMaster) {
+                callback(newExtractorLink("Idlix", "Idlix", initialMaster, type = ExtractorLinkType.M3U8) {
                     this.referer = "$mainUrl/"
                 })
                 return true
@@ -362,13 +382,14 @@ class Idlix : MainAPI() {
         return false
     }
 
-    private suspend fun postClaim(gateToken: String): JSONObject {
+    private suspend fun postClaim(gateToken: String, pageUrl: String, cookieHeader: Map<String, String>): JSONObject {
         val claimResp = app.post(
             "$mainUrl/api/watch/session/claim",
             headers = apiHeaders + mapOf(
                 "Origin" to mainUrl,
+                "Referer" to "$pageUrl/",
                 "Content-Type" to "application/json"
-            ),
+            ) + cookieHeader,
             json = JsonAsString("""{"gateToken":"$gateToken"}"""),
             interceptor = cfKiller
         )
