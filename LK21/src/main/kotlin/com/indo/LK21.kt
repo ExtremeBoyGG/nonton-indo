@@ -44,8 +44,61 @@ class LK21 : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=${query.trim().replace(" ", "+")}"
-        val doc = app.get(url, headers = headers).document
+        val searchUrl = "$mainUrl/search?s=${query.trim().replace(" ", "+")}"
+        val doc = app.get(searchUrl, headers = headers).document
+        val body = doc.selectFirst("body")
+        val apiBase = body?.attr("data-search_url")?.ifBlank { null } ?: "https://gudangvape.com/"
+        val thumbBase = body?.attr("data-thumbnail_url")?.ifBlank { null } ?: "https://poster.assetsy.de/wp-content/uploads/"
+
+        val encodedQuery = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val apiUrl = "${apiBase.trimEnd('/')}/search.php?s=$encodedQuery&page=1"
+
+        val apiRes = try {
+            app.get(
+                apiUrl,
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer" to "$mainUrl/",
+                    "Origin" to mainUrl
+                )
+            ).text
+        } catch (_: Exception) {
+            null
+        }
+
+        if (!apiRes.isNullOrBlank()) {
+            val json = try { JSONObject(apiRes) } catch (_: Exception) { null }
+            val data = json?.optJSONArray("data")
+            if (data != null && data.length() > 0) {
+                val results = mutableListOf<SearchResponse>()
+                for (i in 0 until data.length()) {
+                    val item = data.optJSONObject(i) ?: continue
+                    val slug = item.optString("slug").trim().removePrefix("/")
+                    if (slug.isBlank()) continue
+                    if (item.optString("type").equals("series", ignoreCase = true)) continue
+
+                    val href = "$mainUrl/$slug"
+                    val rawTitle = item.optString("title").ifBlank { slug }
+                    val title = rawTitle.replace(Regex("""\(\d{4}\).*$"""), "").trim().ifBlank { rawTitle }
+                    val posterPath = item.optString("poster")
+                    val posterUrl = if (posterPath.isNotBlank()) {
+                        if (posterPath.startsWith("http")) posterPath else "${thumbBase.trimEnd('/')}/$posterPath"
+                    } else null
+                    val year = item.optInt("year").takeIf { it > 0 }
+                    val rating = item.optDouble("rating").takeIf { !it.isNaN() && it > 0.0 }
+
+                    results.add(newMovieSearchResponse(title, href, TvType.Movie) {
+                        this.posterUrl = posterUrl
+                        this.year = year
+                        rating?.let { this.score = Score.from10(it) }
+                    })
+                }
+                if (results.isNotEmpty()) {
+                    return results
+                }
+            }
+        }
+
         return doc.select("article[itemscope][itemtype*='Movie'], article").mapNotNull { toSearchResponse(it) }
     }
 
