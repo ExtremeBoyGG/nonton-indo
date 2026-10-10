@@ -103,6 +103,58 @@ class LK21 : MainAPI() {
         }
     }
 
+    private fun sanitizeAbyssPayload(enc: String): String? {
+        return try {
+            val rawBytes = android.util.Base64.decode(enc, android.util.Base64.DEFAULT)
+            val rawJsonStr = String(rawBytes, Charsets.ISO_8859_1)
+            val json = JSONObject(rawJsonStr)
+            val userId = json.optString("user_id")
+            val slug = json.optString("slug")
+            val md5Id = json.optString("md5_id")
+            val mediaStr = json.optString("media")
+            if (userId.isBlank() || slug.isBlank() || md5Id.isBlank() || mediaStr.isBlank()) return null
+
+            val keyStr = "$userId:$slug:$md5Id"
+            val md5 = java.security.MessageDigest.getInstance("MD5").digest(keyStr.toByteArray(Charsets.UTF_8))
+            val md5Hex = md5.joinToString("") { "%02x".format(it) }
+            val keyBytes = md5Hex.toByteArray(Charsets.UTF_8)
+            val ivBytes = keyBytes.copyOfRange(0, 16)
+
+            val mediaBytes = ByteArray(mediaStr.length) { mediaStr[it].code.toByte() }
+            val cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding")
+            val keySpec = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+            val ivSpec = javax.crypto.spec.IvParameterSpec(ivBytes)
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            val decryptedBytes = cipher.doFinal(mediaBytes)
+            val decryptedJsonStr = String(decryptedBytes, Charsets.UTF_8)
+
+            val mediaObj = JSONObject(decryptedJsonStr)
+            val mp4 = mediaObj.optJSONObject("mp4") ?: return null
+            val sources = mp4.optJSONArray("sources") ?: return null
+            val newSources = org.json.JSONArray()
+            for (i in 0 until sources.length()) {
+                val src = sources.optJSONObject(i) ?: continue
+                if (src.has("sub") && src.optString("sub").isNotBlank()) {
+                    newSources.put(src)
+                }
+            }
+            mp4.put("sources", newSources)
+
+            val newMediaStr = mediaObj.toString()
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+            val reEncryptedBytes = cipher.doFinal(newMediaStr.toByteArray(Charsets.UTF_8))
+            val reEncryptedBin = StringBuilder(reEncryptedBytes.size)
+            for (b in reEncryptedBytes) {
+                reEncryptedBin.append((b.toInt() and 0xFF).toChar())
+            }
+            json.put("media", reEncryptedBin.toString())
+            val finalJsonBytes = json.toString().toByteArray(Charsets.ISO_8859_1)
+            android.util.Base64.encodeToString(finalJsonBytes, android.util.Base64.NO_WRAP)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private suspend fun extractHydrax(
         embedUrl: String,
         playerUrl: String,
@@ -120,7 +172,7 @@ class LK21 : MainAPI() {
             val enc = Regex("""const\s+datas\s*=\s*"([^"]*)"""").find(areq)?.groupValues?.getOrNull(1) ?: return false
 
             val jsonPayload = JSONObject().put("text", enc).toString()
-            val decRes = app.post(
+            var decRes = app.post(
                 "https://enc-dec.app/api/dec-abyss",
                 headers = mapOf(
                     "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
@@ -131,8 +183,28 @@ class LK21 : MainAPI() {
                 json = JsonAsString(jsonPayload)
             ).text
 
-            val decJson = JSONObject(decRes)
-            val result = decJson.optJSONObject("result") ?: return false
+            var decJson = JSONObject(decRes)
+            var result = decJson.optJSONObject("result")
+            if (result == null || decJson.optInt("status") != 200) {
+                val sanitizedEnc = sanitizeAbyssPayload(enc)
+                if (sanitizedEnc != null) {
+                    val sanitizedPayload = JSONObject().put("text", sanitizedEnc).toString()
+                    decRes = app.post(
+                        "https://enc-dec.app/api/dec-abyss",
+                        headers = mapOf(
+                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+                            "Content-Type" to "application/json",
+                            "Origin" to "https://playhydrax.com",
+                            "Referer" to "https://playhydrax.com/"
+                        ),
+                        json = JsonAsString(sanitizedPayload)
+                    ).text
+                    decJson = JSONObject(decRes)
+                    result = decJson.optJSONObject("result")
+                }
+            }
+
+            if (result == null) return false
             val sources = result.optJSONArray("sources") ?: return false
 
             val parsedSources = mutableListOf<Pair<ExtractorLink, Int>>()
