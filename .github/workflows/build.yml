@@ -12,6 +12,9 @@ on:
     paths-ignore:
       - '*.md'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,7 +29,7 @@ jobs:
         with:
           ref: "builds"
           path: "builds"
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Clean old builds
         run: |
@@ -60,8 +63,8 @@ jobs:
       - name: Push builds
         run: |
           cd $GITHUB_WORKSPACE/builds
-          git config --local user.email "herilrtg123@gmail.com"
-          git config --local user.name "ExtremeBoyGG"
+          git config --local user.email "${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com"
+          git config --local user.name "${GITHUB_ACTOR}"
           git add -A
-          git commit --amend -m "Build $GITHUB_SHA" || exit 0
+          git commit --amend --reset-author -m "Build $GITHUB_SHA" || exit 0
           git push --force
