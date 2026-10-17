@@ -18,18 +18,25 @@ class LK21 : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
 
-    private val headers = mapOf(
+    private val movieUrl = "https://tv12.lk21official.cc"
+    private val seriesUrl = "https://tv9.nontondrama.my"
+
+    private val defaultHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-        "Referer" to "$mainUrl/"
+        "Referer" to "$seriesUrl/"
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/latest" to "Series Terbaru",
-        "$mainUrl/populer" to "Series Populer",
-        "$mainUrl/series/ongoing" to "Series Ongoing",
-        "$mainUrl/series/complete" to "Series Komplit",
-        "$mainUrl/series/asian" to "Drama Asia",
-        "$mainUrl/series/west" to "West Series"
+        "$movieUrl/latest" to "Film Terbaru",
+        "$movieUrl/populer" to "Film Populer",
+        "$movieUrl/top-movie-today" to "Top Movies / Box Office",
+        "$movieUrl/rating" to "Film Rating Tertinggi",
+        "$seriesUrl/latest" to "Series Terbaru",
+        "$seriesUrl/populer" to "Series Populer",
+        "$seriesUrl/series/ongoing" to "Series Ongoing",
+        "$seriesUrl/series/complete" to "Series Komplit",
+        "$seriesUrl/series/asian" to "Drama Asia",
+        "$seriesUrl/series/west" to "West Series"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -39,14 +46,20 @@ class LK21 : MainAPI() {
             "${request.data}/page/$page"
         }
 
-        val doc = app.get(url, headers = headers).document
-        val items = doc.select("article[itemscope], article").mapNotNull { toSearchResponse(it) }
+        val isMovieReq = request.data.contains("lk21official")
+        val reqHeaders = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Referer" to if (isMovieReq) "$movieUrl/" else "$seriesUrl/"
+        )
+
+        val doc = app.get(url, headers = reqHeaders).document
+        val items = doc.select("article[itemscope], article").mapNotNull { toSearchResponse(it, isMovieReq) }
         return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val searchUrl = "$mainUrl/search?s=${query.trim().replace(" ", "+")}"
-        val doc = app.get(searchUrl, headers = headers).document
+        val searchUrl = "$seriesUrl/search?s=${query.trim().replace(" ", "+")}"
+        val doc = app.get(searchUrl, headers = defaultHeaders).document
         val body = doc.selectFirst("body")
         val apiBase = body?.attr("data-search_url")?.ifBlank { null } ?: "https://gudangvape.com/"
         val thumbBase = body?.attr("data-thumbnail_url")?.ifBlank { null } ?: "https://poster.assetsy.de/wp-content/uploads/"
@@ -59,8 +72,8 @@ class LK21 : MainAPI() {
                 apiUrl,
                 headers = mapOf(
                     "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-                    "Referer" to "$mainUrl/",
-                    "Origin" to mainUrl
+                    "Referer" to "$seriesUrl/",
+                    "Origin" to seriesUrl
                 )
             ).text
         } catch (_: Exception) {
@@ -79,7 +92,7 @@ class LK21 : MainAPI() {
 
                     val typeStr = item.optString("type").lowercase()
                     val isSeries = typeStr == "series"
-                    val href = if (isSeries) "$mainUrl/$slug" else "https://tv12.lk21official.cc/$slug"
+                    val href = if (isSeries) "$seriesUrl/$slug" else "$movieUrl/$slug"
 
                     val rawTitle = item.optString("title").ifBlank { slug }
                     val title = rawTitle.replace(Regex("""\(\d{4}\).*$"""), "").trim().ifBlank { rawTitle }
@@ -113,9 +126,20 @@ class LK21 : MainAPI() {
         return doc.select("article[itemscope], article").mapNotNull { toSearchResponse(it) }
     }
 
-    private fun toSearchResponse(element: Element): SearchResponse? {
+    private fun toSearchResponse(element: Element, forceMovie: Boolean? = null): SearchResponse? {
         val link = element.selectFirst("figure a[itemprop=url], a[itemprop=url], figure a, a") ?: return null
-        val href = fixUrlNull(link.attr("href")) ?: return null
+        val rawHref = link.attr("href").trim()
+        if (rawHref.isBlank() || rawHref.startsWith("#")) return null
+
+        val isSeries = when (forceMovie) {
+            true -> false
+            false -> true
+            null -> element.selectFirst("span.episode") != null || rawHref.contains("nontondrama") || (!rawHref.contains("lk21official") && element.selectFirst(".duration:contains(S.)") != null)
+        }
+
+        val base = if (isSeries) seriesUrl else movieUrl
+        val href = if (rawHref.startsWith("http")) rawHref else "$base/${rawHref.removePrefix("/")}"
+
         val title = element.selectFirst("h3.poster-title, [itemprop=name], h3")?.text()?.trim()
             ?: link.attr("title")
                 .replace(Regex("^(?:Nonton movie|Nonton|Streaming)\\s*", RegexOption.IGNORE_CASE), "")
@@ -129,8 +153,6 @@ class LK21 : MainAPI() {
             }
         val score = element.selectFirst("span[itemprop=ratingValue]")?.text()?.toDoubleOrNull()
         val year = element.selectFirst("span.year, [itemprop=datePublished]")?.text()?.trim()?.toIntOrNull()
-
-        val isSeries = element.selectFirst("span.episode") != null || href.contains("nontondrama") || !href.contains("lk21official")
 
         return if (isSeries) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -148,7 +170,13 @@ class LK21 : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url, headers = headers).document
+        val isMovieUrl = url.contains("lk21official")
+        val reqHeaders = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Referer" to if (isMovieUrl) "$movieUrl/" else "$seriesUrl/"
+        )
+
+        val doc = app.get(url, headers = reqHeaders).document
 
         val historyJson = try {
             doc.selectFirst("script#watch-history-data")?.data()?.let { JSONObject(it) }
@@ -200,7 +228,7 @@ class LK21 : MainAPI() {
                         val epSlug = epObj.optString("slug")
                         if (epSlug.isBlank()) continue
                         val epTitle = epObj.optString("title").ifBlank { "S${sNum}E$epNum" }
-                        val epUrl = if (epSlug.startsWith("http")) epSlug else "$mainUrl/$epSlug"
+                        val epUrl = if (epSlug.startsWith("http")) epSlug else "$seriesUrl/$epSlug"
                         episodes.add(newEpisode(epUrl) {
                             this.name = epTitle
                             this.season = sNum
@@ -411,7 +439,13 @@ class LK21 : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data, headers = headers).document
+        val isMovieData = data.contains("lk21official")
+        val reqHeaders = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Referer" to if (isMovieData) "$movieUrl/" else "$seriesUrl/"
+        )
+
+        val doc = app.get(data, headers = reqHeaders).document
 
         val playerElements = doc.select("#player-list li a")
         val playerList = if (playerElements.isNotEmpty()) {
