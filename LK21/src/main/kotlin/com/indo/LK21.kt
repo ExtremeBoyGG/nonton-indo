@@ -10,25 +10,26 @@ import com.lagradost.nicehttp.JsonAsString
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 
-
-
-
 class LK21 : MainAPI() {
-    override var mainUrl = "https://tv12.lk21official.cc"
+    override var mainUrl = "https://tv9.nontondrama.my"
     override var name = "LK21"
     override val hasMainPage = true
     override var lang = "id"
     override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Movie)
+    override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
 
     private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/latest" to "Film Terbaru",
-        "$mainUrl/populer" to "Film Populer"
+        "$mainUrl/latest" to "Series Terbaru",
+        "$mainUrl/populer" to "Series Populer",
+        "$mainUrl/series/ongoing" to "Series Ongoing",
+        "$mainUrl/series/complete" to "Series Komplit",
+        "$mainUrl/series/asian" to "Drama Asia",
+        "$mainUrl/series/west" to "West Series"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -39,7 +40,7 @@ class LK21 : MainAPI() {
         }
 
         val doc = app.get(url, headers = headers).document
-        val items = doc.select("article[itemscope][itemtype*='Movie'], article").mapNotNull { toSearchResponse(it) }
+        val items = doc.select("article[itemscope], article").mapNotNull { toSearchResponse(it) }
         return newHomePageResponse(request.name, items)
     }
 
@@ -57,7 +58,7 @@ class LK21 : MainAPI() {
             app.get(
                 apiUrl,
                 headers = mapOf(
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
                     "Referer" to "$mainUrl/",
                     "Origin" to mainUrl
                 )
@@ -75,9 +76,11 @@ class LK21 : MainAPI() {
                     val item = data.optJSONObject(i) ?: continue
                     val slug = item.optString("slug").trim().removePrefix("/")
                     if (slug.isBlank()) continue
-                    if (item.optString("type").equals("series", ignoreCase = true)) continue
 
-                    val href = "$mainUrl/$slug"
+                    val typeStr = item.optString("type").lowercase()
+                    val isSeries = typeStr == "series"
+                    val href = if (isSeries) "$mainUrl/$slug" else "https://tv12.lk21official.cc/$slug"
+
                     val rawTitle = item.optString("title").ifBlank { slug }
                     val title = rawTitle.replace(Regex("""\(\d{4}\).*$"""), "").trim().ifBlank { rawTitle }
                     val posterPath = item.optString("poster")
@@ -87,11 +90,19 @@ class LK21 : MainAPI() {
                     val year = item.optInt("year").takeIf { it > 0 }
                     val rating = item.optDouble("rating").takeIf { !it.isNaN() && it > 0.0 }
 
-                    results.add(newMovieSearchResponse(title, href, TvType.Movie) {
-                        this.posterUrl = posterUrl
-                        this.year = year
-                        rating?.let { this.score = Score.from10(it) }
-                    })
+                    if (isSeries) {
+                        results.add(newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                            this.posterUrl = posterUrl
+                            this.year = year
+                            rating?.let { this.score = Score.from10(it) }
+                        })
+                    } else {
+                        results.add(newMovieSearchResponse(title, href, TvType.Movie) {
+                            this.posterUrl = posterUrl
+                            this.year = year
+                            rating?.let { this.score = Score.from10(it) }
+                        })
+                    }
                 }
                 if (results.isNotEmpty()) {
                     return results
@@ -99,7 +110,7 @@ class LK21 : MainAPI() {
             }
         }
 
-        return doc.select("article[itemscope][itemtype*='Movie'], article").mapNotNull { toSearchResponse(it) }
+        return doc.select("article[itemscope], article").mapNotNull { toSearchResponse(it) }
     }
 
     private fun toSearchResponse(element: Element): SearchResponse? {
@@ -119,40 +130,103 @@ class LK21 : MainAPI() {
         val score = element.selectFirst("span[itemprop=ratingValue]")?.text()?.toDoubleOrNull()
         val year = element.selectFirst("span.year, [itemprop=datePublished]")?.text()?.trim()?.toIntOrNull()
 
-        return newMovieSearchResponse(title, href, TvType.Movie) {
-            this.posterUrl = poster
-            this.year = year
-            score?.let { this.score = Score.from10(it) }
+        val isSeries = element.selectFirst("span.episode") != null || href.contains("nontondrama") || !href.contains("lk21official")
+
+        return if (isSeries) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = poster
+                this.year = year
+                score?.let { this.score = Score.from10(it) }
+            }
+        } else {
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = poster
+                this.year = year
+                score?.let { this.score = Score.from10(it) }
+            }
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = headers).document
-        val title = doc.selectFirst("h1.entry-title, h1")?.text()?.trim()
-            ?.replace(Regex("^(?:Lk21\\s*|Nonton\\s*)", RegexOption.IGNORE_CASE), "")
-            ?.replace(Regex("\\s*Sub Indo.*$", RegexOption.IGNORE_CASE), "")
-            ?.trim() ?: "Movie"
 
-        val poster = doc.selectFirst("meta[property='og:image']")?.attr("content")
-            ?: doc.selectFirst("picture img, figure img, .poster img")?.attr("src")
+        val historyJson = try {
+            doc.selectFirst("script#watch-history-data")?.data()?.let { JSONObject(it) }
+        } catch (_: Exception) {
+            null
+        }
 
-        val plot = doc.selectFirst("div.synopsis")?.text()?.trim()
+        val rawTitle = historyJson?.optString("title")?.ifBlank { null }
+            ?: doc.selectFirst("h1.entry-title, h1")?.text()?.trim()
+            ?: "LK21"
+
+        val title = rawTitle
+            .replace(Regex("^(?:Lk21\\s*|Nonton\\s*)", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*Sub Indo.*$", RegexOption.IGNORE_CASE), "")
+            .trim()
+
+        val poster = historyJson?.optString("poster")?.ifBlank { null }
+            ?: doc.selectFirst("meta[property='og:image']")?.attr("content")
+            ?: doc.selectFirst("figure.poster img, picture img, figure img, .poster img")?.let { img ->
+                img.attr("src").ifBlank { img.attr("data-src") }
+            }
+
+        val plot = doc.selectFirst("div.synopsis, [itemprop=description]")?.text()?.trim()
             ?: doc.selectFirst("meta[property='og:description']")?.attr("content")
 
-        val year = doc.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
+        val year = historyJson?.optInt("year")?.takeIf { it > 0 }
+            ?: doc.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
             ?: doc.selectFirst("div.detail p:contains(Release)")?.text()?.let {
                 Regex("""(\d{4})""").find(it)?.groupValues?.get(1)?.toIntOrNull()
             }
 
         val tags = doc.select("main a[href*='/genre/'], .meta-info a[href*='/genre/']").map { it.text().trim() }.distinct()
-        val score = doc.selectFirst("[itemprop=ratingValue]")?.text()?.toDoubleOrNull()
+        val score = historyJson?.optDouble("rating")?.takeIf { !it.isNaN() && it > 0.0 }
+            ?: doc.selectFirst("[itemprop=ratingValue]")?.text()?.toDoubleOrNull()
 
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl = poster
-            this.plot = plot
-            this.year = year
-            this.tags = tags
-            score?.let { this.score = Score.from10(it) }
+        val seasonDataStr = doc.selectFirst("script#season-data")?.data()
+        val episodes = mutableListOf<Episode>()
+
+        if (!seasonDataStr.isNullOrBlank()) {
+            try {
+                val seasonsJson = JSONObject(seasonDataStr)
+                val seasonKeys = seasonsJson.keys().asSequence().toList().sortedBy { it.toIntOrNull() ?: 0 }
+                for (sKey in seasonKeys) {
+                    val sNum = sKey.toIntOrNull() ?: 1
+                    val epArray = seasonsJson.optJSONArray(sKey) ?: continue
+                    for (i in 0 until epArray.length()) {
+                        val epObj = epArray.optJSONObject(i) ?: continue
+                        val epNum = epObj.optInt("episode_no", i + 1)
+                        val epSlug = epObj.optString("slug")
+                        if (epSlug.isBlank()) continue
+                        val epTitle = epObj.optString("title").ifBlank { "S${sNum}E$epNum" }
+                        val epUrl = if (epSlug.startsWith("http")) epSlug else "$mainUrl/$epSlug"
+                        episodes.add(newEpisode(epUrl) {
+                            this.name = epTitle
+                            this.season = sNum
+                            this.episode = epNum
+                        })
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        return if (episodes.isNotEmpty()) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.plot = plot
+                this.year = year
+                this.tags = tags
+                score?.let { this.score = Score.from10(it) }
+            }
+        } else {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.plot = plot
+                this.year = year
+                this.tags = tags
+                score?.let { this.score = Score.from10(it) }
+            }
         }
     }
 
@@ -208,9 +282,38 @@ class LK21 : MainAPI() {
         }
     }
 
+    private suspend fun extractAbyssSubtitles(enc: String, subtitleCallback: (SubtitleFile) -> Unit) {
+        try {
+            val rawBytes = android.util.Base64.decode(enc, android.util.Base64.DEFAULT)
+            val rawJsonStr = String(rawBytes, Charsets.ISO_8859_1)
+            val json = JSONObject(rawJsonStr)
+            val md5Id = json.optString("md5_id")
+            if (md5Id.isBlank()) return
+
+            val subs = json.optJSONObject("config")?.optJSONArray("subtitles") ?: return
+            for (i in 0 until subs.length()) {
+                val subObj = subs.optJSONObject(i) ?: continue
+                val subSlug = subObj.optString("slug")
+                if (subSlug.isBlank()) continue
+                val subType = subObj.optString("type", "srt").ifBlank { "srt" }
+                val rawLang = subObj.optString("lang", "id").ifBlank { "id" }
+                val langLabel = when (rawLang.lowercase()) {
+                    "id", "ind", "indonesian", "indonesia" -> "Indonesian"
+                    "en", "eng", "english" -> "English"
+                    "ms", "may", "malay" -> "Malay"
+                    else -> rawLang
+                }
+                val subUrl = "https://cdn.iamcdn.net/subtitle/$md5Id/$subSlug.$subType"
+                subtitleCallback(newSubtitleFile(langLabel, subUrl))
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private suspend fun extractHydrax(
         embedUrl: String,
         playerUrl: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         try {
@@ -223,6 +326,8 @@ class LK21 : MainAPI() {
             ).text
 
             val enc = Regex("""const\s+datas\s*=\s*"([^"]*)"""").find(areq)?.groupValues?.getOrNull(1) ?: return false
+
+            extractAbyssSubtitles(enc, subtitleCallback)
 
             val jsonPayload = JSONObject().put("text", enc).toString()
             var decRes = app.post(
@@ -316,7 +421,6 @@ class LK21 : MainAPI() {
                     val name = a.attr("data-server").ifBlank { a.text().trim() }.ifBlank { "Server" }
                     Pair(name, playerUrl)
                 } else null
-
             }
         } else {
             val iframeSrc = doc.selectFirst("iframe#main-player")?.attr("src")
@@ -343,7 +447,7 @@ class LK21 : MainAPI() {
                     val postRes = app.post(
                         "https://videonode.de/api.php",
                         headers = mapOf(
-                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
                             "Content-Type" to "application/x-www-form-urlencoded",
                             "Referer" to playerUrl,
                             "Origin" to "https://videonode.de"
@@ -354,7 +458,7 @@ class LK21 : MainAPI() {
                     val embedUrl = try { JSONObject(postRes).optString("embedUrl") } catch (e: Exception) { null }
                     if (!embedUrl.isNullOrBlank()) {
                         if (host.equals("hydrax", ignoreCase = true) || embedUrl.contains("abyssplayer") || embedUrl.contains("playhydrax")) {
-                            val hydraxFound = extractHydrax(embedUrl, playerUrl, callback)
+                            val hydraxFound = extractHydrax(embedUrl, playerUrl, subtitleCallback, callback)
                             if (hydraxFound) {
                                 foundAny = true
                             }
@@ -363,7 +467,7 @@ class LK21 : MainAPI() {
                             val verifyRes = app.get(
                                 "https://playcdn.de/verify/$slug",
                                 headers = mapOf(
-                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
                                     "Referer" to embedUrl,
                                     "X-Requested-With" to "XMLHttpRequest"
                                 )
@@ -422,4 +526,3 @@ class LK21 : MainAPI() {
         return foundAny
     }
 }
-
