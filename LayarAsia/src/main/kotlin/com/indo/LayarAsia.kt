@@ -12,6 +12,7 @@ import org.json.JSONObject
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
@@ -210,32 +211,25 @@ class LayarAsia : MainAPI() {
 
         val iframes = mutableListOf<String>()
 
-        // 1. Direct iframe in embed_holder
-        doc.select("#embed_holder iframe[src], #pembed iframe[src]").forEach {
+        // 1. Direct iframe in embed_holder, pembed, player-embed
+        doc.select("#embed_holder iframe[src], #pembed iframe[src], .player-embed iframe[src]").forEach {
             val src = it.attr("src").trim()
             if (src.isNotBlank() && !src.startsWith("about:") && !src.startsWith("javascript:")) {
                 iframes.add(fixUrl(src))
             }
         }
 
-        // 2. Mirror select options (Base64 encoded iframes)
+        // 2. Mirror select options
         doc.select("select.mirror option, select[name='mirror'] option").forEach { opt ->
             val valStr = opt.attr("value").trim()
-            if (valStr.length > 8) {
-                try {
-                    val decoded = String(android.util.Base64.decode(valStr, android.util.Base64.DEFAULT), Charsets.UTF_8)
-                    val m = Regex("""src\s*=\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(decoded)
-                    val src = m?.groupValues?.getOrNull(1)?.trim()
-                    if (!src.isNullOrBlank()) {
-                        iframes.add(fixUrl(src))
-                    }
-                } catch (_: Exception) {
-                }
-            }
+            extractSrcFromOption(valStr)?.let { iframes.add(fixUrl(it)) }
         }
 
         for (src in iframes.distinct()) {
             when {
+                src.contains("byse") || src.contains("bysesukior") -> {
+                    extractByse(src, subtitleCallback, callback)
+                }
                 src.contains("upns") || src.contains("strp2p") || src.contains("p2pstream") -> {
                     extractUpns(src, subtitleCallback, callback)
                 }
@@ -251,13 +245,133 @@ class LayarAsia : MainAPI() {
         return true
     }
 
+    private fun extractSrcFromOption(valStr: String): String? {
+        if (valStr.isBlank()) return null
+        val directMatch = Regex("""src\s*=\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(valStr)?.groupValues?.getOrNull(1)
+            ?: if (valStr.startsWith("http")) valStr else null
+        if (!directMatch.isNullOrBlank()) return directMatch
+
+        return try {
+            val decoded = String(android.util.Base64.decode(valStr, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            Regex("""src\s*=\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(decoded)?.groupValues?.getOrNull(1)?.trim()
+                ?: if (decoded.startsWith("http")) decoded.trim() else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun base64UrlDecode(str: String): ByteArray {
+        var s = str.trim().replace('-', '+').replace('_', '/')
+        val pad = s.length % 4
+        if (pad > 0) {
+            s += "=".repeat(4 - pad)
+        }
+        return android.util.Base64.decode(s, android.util.Base64.DEFAULT)
+    }
+
+    private suspend fun extractByse(
+        embedUrl: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return try {
+            val domain = Regex("""https?://([^/]+)""").find(embedUrl)?.groupValues?.getOrNull(1) ?: return false
+            val code = Regex("""/e/([a-zA-Z0-9_-]+)""").find(embedUrl)?.groupValues?.getOrNull(1) ?: return false
+            val apiUrl = "https://$domain/api/videos/$code/"
+
+            val resp = app.get(
+                apiUrl,
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+                    "Referer" to embedUrl,
+                    "Accept" to "application/json, text/plain, */*"
+                )
+            ).text.trim()
+
+            val json = JSONObject(resp)
+            val playback = json.optJSONObject("playback") ?: return false
+            val ivStr = playback.optString("iv").ifBlank { return false }
+            val payloadStr = playback.optString("payload").ifBlank { return false }
+            val version = playback.optString("version").toIntOrNull() ?: 1
+            val keyParts = playback.optJSONArray("key_parts") ?: return false
+            if (keyParts.length() < 30) return false
+
+            val idx1 = version
+            val idx2 = 31 - version
+            if (idx1 < 1 || idx1 > keyParts.length() || idx2 < 1 || idx2 > keyParts.length()) return false
+
+            val part1 = keyParts.getString(idx1 - 1)
+            val part2 = keyParts.getString(idx2 - 1)
+
+            val keyBytes = base64UrlDecode(part1) + base64UrlDecode(part2)
+            val ivBytes = base64UrlDecode(ivStr)
+            val payloadBytes = base64UrlDecode(payloadStr)
+
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val keySpec = SecretKeySpec(keyBytes, "AES")
+            val gcmSpec = GCMParameterSpec(128, ivBytes)
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
+            val decryptedBytes = cipher.doFinal(payloadBytes)
+            val decryptedJson = JSONObject(String(decryptedBytes, Charsets.UTF_8))
+
+            val sources = decryptedJson.optJSONArray("sources") ?: return false
+            for (i in 0 until sources.length()) {
+                val source = sources.getJSONObject(i)
+                val m3u8Url = source.optString("url").ifBlank { null } ?: continue
+                val label = source.optString("label", "1080p")
+                val quality = when {
+                    label.contains("1080") -> Qualities.P1080.value
+                    label.contains("720") -> Qualities.P720.value
+                    label.contains("480") -> Qualities.P480.value
+                    label.contains("360") -> Qualities.P360.value
+                    else -> Qualities.Unknown.value
+                }
+
+                val links = try {
+                    M3u8Helper.generateM3u8(
+                        "Byse",
+                        m3u8Url,
+                        "https://$domain/",
+                        headers = mapOf("Referer" to "https://$domain/")
+                    )
+                } catch (_: Exception) {
+                    emptyList()
+                }
+
+                if (links.isNotEmpty()) {
+                    links.forEach(callback)
+                } else {
+                    callback(
+                        newExtractorLink(
+                            "Byse",
+                            "Byse $label",
+                            m3u8Url,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.quality = quality
+                            this.referer = "https://$domain/"
+                            this.headers = mapOf("Referer" to "https://$domain/")
+                        }
+                    )
+                }
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private suspend fun extractUpns(
         embedUrl: String,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            val hashId = embedUrl.substringAfter("#", "").substringBefore("&").trim()
+            val hashId = if (embedUrl.contains("#")) {
+                embedUrl.substringAfter("#", "").substringBefore("&").trim()
+            } else {
+                embedUrl.substringAfterLast("/").substringBefore("?").trim()
+            }
             if (hashId.isBlank()) return false
 
             val domain = Regex("""https?://([^/]+)""").find(embedUrl)?.groupValues?.getOrNull(1) ?: return false
@@ -278,11 +392,17 @@ class LayarAsia : MainAPI() {
             val json = JSONObject(decryptedJson)
             val masterM3u8 = json.optString("cfNative").ifBlank { null } ?: json.optString("source").ifBlank { null } ?: return false
 
-            val links = M3u8Helper.generateM3u8(
-                "UPNShare",
-                masterM3u8,
-                "https://$domain/"
-            )
+            val links = try {
+                M3u8Helper.generateM3u8(
+                    "UPNShare",
+                    masterM3u8,
+                    "https://$domain/",
+                    headers = mapOf("Referer" to "https://$domain/")
+                )
+            } catch (_: Exception) {
+                emptyList()
+            }
+
             if (links.isNotEmpty()) {
                 links.forEach(callback)
             } else {

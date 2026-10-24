@@ -68,3 +68,12 @@ jobs:
           git add -A
           git commit --amend --reset-author -m "Build $GITHUB_SHA" || exit 0
           git push --force
+
+      - name: Purge jsDelivr cache
+        if: success()
+        run: |
+          sleep 2
+          curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@builds/plugins.json" || true
+          curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@builds/repo.json" || true
+          curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@builds/LayarAsia.cs3" || true
+          curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@builds/PusatFilm.cs3" || true
