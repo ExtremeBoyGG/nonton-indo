@@ -1,4 +1,4 @@
-version = 1
+version = 1 // v1 restored
 
 cloudstream {
     language = "id"
