@@ -154,13 +154,22 @@ class LayarAsia : MainAPI() {
             url.contains("type=movie")
         )
 
+        val tmdb = TmdbHelper.getMetadata(title, isMovie, year)
+
         return if (isMovie) {
             val streamUrl = epElements.firstOrNull()?.attr("href")?.let { fixUrlNull(it) } ?: url
             newMovieLoadResponse(title, url, TvType.Movie, streamUrl) {
-                this.posterUrl = poster?.let { fixUrlNull(it) }
-                this.plot = plot
+                this.posterUrl = tmdb?.posterUrl ?: poster?.let { fixUrlNull(it) }
+                this.backgroundPosterUrl = tmdb?.backgroundPosterUrl
+                this.plot = tmdb?.plot ?: plot
                 this.year = year
                 this.tags = tags
+                if (tmdb?.actors?.isNotEmpty() == true) {
+                    this.actors = tmdb.actors
+                }
+                if (tmdb != null && tmdb.voteAverage > 0) {
+                    this.score = Score.from10(tmdb.voteAverage)
+                }
             }
         } else {
             val episodes = epElements.mapNotNull { a ->
@@ -193,10 +202,17 @@ class LayarAsia : MainAPI() {
             }
 
             newTvSeriesLoadResponse(title, url, TvType.AsianDrama, finalEpisodes) {
-                this.posterUrl = poster?.let { fixUrlNull(it) }
-                this.plot = plot
+                this.posterUrl = tmdb?.posterUrl ?: poster?.let { fixUrlNull(it) }
+                this.backgroundPosterUrl = tmdb?.backgroundPosterUrl
+                this.plot = tmdb?.plot ?: plot
                 this.year = year
                 this.tags = tags
+                if (tmdb?.actors?.isNotEmpty() == true) {
+                    this.actors = tmdb.actors
+                }
+                if (tmdb != null && tmdb.voteAverage > 0) {
+                    this.score = Score.from10(tmdb.voteAverage)
+                }
             }
         }
     }
