@@ -60,11 +60,13 @@
 | Plugin | Situs | Status |
 |---|---|---|
 | <img src="https://www.google.com/s2/favicons?domain=blurayufr.site&sz=16" width="16" height="16"> BlurayUFR | blurayufr.site | ✅ Stable |
-| <img src="https://www.google.com/s2/favicons?domain=gfymultimedx.online&sz=16" width="16" height="16"> GfyMultimedx | gfymultimedx.online | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=gfymultimedx.online&sz=16" width="16" height="16"> GfyMultimedx | gfymultimedx.online | ⚠️ Butuh Akun OTP |
 | <img src="https://www.google.com/s2/favicons?domain=sweetiepieparenting.com&sz=16" width="16" height="16"> Idlix | sweetiepieparenting.com | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=server-1.layar.asia&sz=16" width="16" height="16"> LayarAsia | server-1.layar.asia | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=tv9.nontondrama.my&sz=16" width="16" height="16"> LK21 | tv9.nontondrama.my | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=themoviebox.org&sz=16" width="16" height="16"> MovieBox | themoviebox.org | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=pahe.ink&sz=16" width="16" height="16"> Pahe | pahe.ink | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=new1.pusatfilm21info.com&sz=16" width="16" height="16"> PusatFilm | new1.pusatfilm21info.com | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=159.89.250.250&sz=16" width="16" height="16"> Rebahin | 159.89.250.250 | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=167.71.237.49&sz=16" width="16" height="16"> SemiRebahin | 167.71.237.49 | ⚠️ Development |
 

@@ -23,6 +23,22 @@ class GfyMultimedx : MainAPI() {
         "Referer" to "$mainUrl/"
     )
 
+    private fun getAuthHeaders(): Map<String, String> {
+        val cookie = com.lagradost.cloudstream3.CommonActivity.activity?.let { ctx ->
+            try {
+                ctx.getSharedPreferences("nonton_indo_prefs", android.content.Context.MODE_PRIVATE)
+                    .getString("gfy_session_cookie", null)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return if (!cookie.isNullOrBlank()) {
+            headers + mapOf("Cookie" to cookie)
+        } else {
+            headers
+        }
+    }
+
     override val mainPage = mainPageOf(
         "$mainUrl/film" to "Film Terbaru",
         "$mainUrl/serial" to "Serial TV",
@@ -101,7 +117,15 @@ class GfyMultimedx : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url, headers = headers).document
+        val reqHeaders = getAuthHeaders()
+        val doc = app.get(url, headers = reqHeaders).document
+
+        if (doc.select("form[data-traffic-verification]").isNotEmpty() ||
+            doc.title().contains("Akun", ignoreCase = true) ||
+            doc.location().contains("/akun/masuk")
+        ) {
+            throw ErrorLoadingException("GfyMultimedx sekarang mewajibkan login akun (Email OTP) oleh pemilik web untuk membuka film/episode.")
+        }
 
         val rawTitle = doc.selectFirst("h1")?.text()?.trim()
             ?: doc.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
@@ -179,8 +203,16 @@ class GfyMultimedx : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val pageResp = app.get(data, headers = headers)
+        val reqHeaders = getAuthHeaders()
+        val pageResp = app.get(data, headers = reqHeaders)
         val doc = pageResp.document
+
+        if (doc.select("form[data-traffic-verification]").isNotEmpty() ||
+            doc.title().contains("Akun", ignoreCase = true) ||
+            pageResp.url.contains("/akun/masuk")
+        ) {
+            throw ErrorLoadingException("GfyMultimedx sekarang mewajibkan login akun (Email OTP) oleh pemilik web untuk memutar video.")
+        }
 
         // 1. Extract subtitles from <track>
         doc.select("track[kind='subtitles'], track[src]").forEach { track ->
