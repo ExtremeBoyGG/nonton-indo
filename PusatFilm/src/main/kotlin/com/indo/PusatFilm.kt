@@ -42,7 +42,8 @@ class PusatFilm : MainAPI() {
 
         val doc = app.get(url, headers = headers).document
         val seenUrls = mutableSetOf<String>()
-        val items = doc.select("a[href*='/movie/'], a[href*='/series/']").mapNotNull {
+        val items = doc.select(".card-grid a[href*='/movie/'], .card-grid a[href*='/series/'], a[href*='/movie/'], a[href*='/series/']").mapNotNull {
+            if (it.parents().any { p -> p.attr("aria-roledescription") == "slide" }) return@mapNotNull null
             val href = it.attr("href").trim()
             if (href.isBlank() || seenUrls.contains(href)) return@mapNotNull null
             val img = it.selectFirst("img") ?: return@mapNotNull null
@@ -84,11 +85,17 @@ class PusatFilm : MainAPI() {
             ?: img?.attr("data-src")?.ifBlank { null }
             ?: img?.attr("data-lazy-src")?.ifBlank { null }
 
-        val titleEl = element.selectFirst("h2, h3, h4, span, p")
+        val titleEl = element.selectFirst("h2, h3, h4, p.truncate, p[class*='text-text-primary']")
         val rawTitle = titleEl?.text()?.ifBlank { null }
             ?: img?.attr("alt")?.ifBlank { null }
             ?: element.text().trim()
-        val title = cleanTitle(rawTitle)
+        var title = cleanTitle(rawTitle)
+        if (title.isBlank() || title.equals("Film", ignoreCase = true) || title.equals("Serial", ignoreCase = true)) {
+            val alt = img?.attr("alt")?.ifBlank { null }
+            if (!alt.isNullOrBlank() && !alt.equals("Film", ignoreCase = true) && !alt.equals("Serial", ignoreCase = true)) {
+                title = cleanTitle(alt)
+            }
+        }
         if (title.isBlank()) return null
 
         val isSeries = href.contains("/series/")
@@ -188,12 +195,21 @@ class PusatFilm : MainAPI() {
     ): Boolean {
         val pageText = app.get(data, headers = headers).text
 
-        val kotakMatches = Regex("""https?://kotakajaib\.me/embed/([a-zA-Z0-9_-]+)""").findAll(pageText)
-            .map { it.groupValues[1] }
-            .distinct()
-            .toList()
+        val unescaped = pageText.replace("\\\"", "\"").replace("\\/", "/")
 
-        for (share in kotakMatches) {
+        val activeShare = Regex("""["']embedUrl["']:\s*["']https?://kotakajaib\.me/(?:embed|file)/([a-zA-Z0-9_-]+)""").find(unescaped)?.groupValues?.getOrNull(1)
+
+        val shares = if (!activeShare.isNullOrBlank()) {
+            listOf(activeShare)
+        } else {
+            Regex("""kotakajaib\.me/(?:embed|file)/([a-zA-Z0-9_-]+)""").findAll(unescaped)
+                .map { it.groupValues[1] }
+                .distinct()
+                .take(2)
+                .toList()
+        }
+
+        for (share in shares) {
             extractKotakAjaib(share, data, subtitleCallback, callback)
         }
 
@@ -299,6 +315,7 @@ class PusatFilm : MainAPI() {
                     type.contains("720") -> Qualities.P720.value
                     type.contains("480") -> Qualities.P480.value
                     type.contains("360") -> Qualities.P360.value
+                    type.equals("Origin", true) -> Qualities.P1080.value
                     else -> Qualities.Unknown.value
                 }
                 callback(

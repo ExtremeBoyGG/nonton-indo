@@ -236,7 +236,7 @@ class LayarAsia : MainAPI() {
 
         for (src in iframes.distinct()) {
             when {
-                src.contains("upns.online") -> {
+                src.contains("upns") || src.contains("strp2p") || src.contains("p2pstream") -> {
                     extractUpns(src, subtitleCallback, callback)
                 }
                 src.contains("abyssplayer") || src.contains("hydrax") || src.contains("abyss.to") || src.contains("playhydrax") -> {
@@ -260,7 +260,7 @@ class LayarAsia : MainAPI() {
             val hashId = embedUrl.substringAfter("#", "").substringBefore("&").trim()
             if (hashId.isBlank()) return false
 
-            val domain = Regex("""https?://([^/]+)""").find(embedUrl)?.groupValues?.getOrNull(1) ?: "sf21.upns.online"
+            val domain = Regex("""https?://([^/]+)""").find(embedUrl)?.groupValues?.getOrNull(1) ?: return false
             val apiUrl = "https://$domain/api/v1/video?id=$hashId"
 
             val hexResp = app.get(
@@ -276,13 +276,28 @@ class LayarAsia : MainAPI() {
 
             val decryptedJson = decryptAes128Cbc(hexResp, "kiemtienmua911ca", "1234567890oiuytr") ?: return false
             val json = JSONObject(decryptedJson)
-            val masterM3u8 = json.optString("source").ifBlank { null } ?: return false
+            val masterM3u8 = json.optString("cfNative").ifBlank { null } ?: json.optString("source").ifBlank { null } ?: return false
 
-            M3u8Helper.generateM3u8(
+            val links = M3u8Helper.generateM3u8(
                 "UPNShare",
                 masterM3u8,
                 "https://$domain/"
-            ).forEach(callback)
+            )
+            if (links.isNotEmpty()) {
+                links.forEach(callback)
+            } else {
+                callback(
+                    newExtractorLink(
+                        "UPNShare",
+                        "UPNShare HLS",
+                        masterM3u8,
+                        type = ExtractorLinkType.M3U8
+                    ) {
+                        this.referer = "https://$domain/"
+                        this.headers = mapOf("Referer" to "https://$domain/")
+                    }
+                )
+            }
 
             true
         } catch (_: Exception) {
