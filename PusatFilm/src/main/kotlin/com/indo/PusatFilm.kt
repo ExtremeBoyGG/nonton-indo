@@ -69,10 +69,11 @@ class PusatFilm : MainAPI() {
     }
 
     private fun cleanTitle(raw: String): String {
-        return raw.replace(Regex("""^Nonton\s+(?:Film|Serial)?\s*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\s+Sub\s+Indo.*$""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\s+Subtitle\s+Indonesia.*$""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\s*/\s*PUSATFILM21.*$""", RegexOption.IGNORE_CASE), "")
+        return raw.replace(Regex("""^Nonton\s+(?:Film|Serial)?\s*(?:sub\s*indo(?:nesia)?)?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\b(?:sub\s*indo(?:nesia)?|subtitle\s*indonesia)\b""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s*[|/]\s*PUSATFILM21.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim(' ', '-', '|', '/')
             .trim()
     }
 
@@ -115,8 +116,10 @@ class PusatFilm : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = headers).document
 
-        val rawTitle = doc.selectFirst("h1")?.text()
-            ?: doc.selectFirst("meta[property='og:title']")?.attr("content")
+        val rawTitle = doc.selectFirst("h1 img[alt]")?.attr("alt")?.ifBlank { null }
+            ?: doc.selectFirst("h1 span[class*='text-4xl'], h1 span[class*='font-black']")?.text()?.ifBlank { null }
+            ?: doc.selectFirst("h1")?.text()?.ifBlank { null }
+            ?: doc.selectFirst("meta[property='og:title']")?.attr("content")?.ifBlank { null }
             ?: name
         val title = cleanTitle(rawTitle)
 
@@ -306,9 +309,20 @@ class PusatFilm : MainAPI() {
                 callback(link)
             }
             if (foundAny) return true
+        } else if (!embedFromData.isNullOrBlank()) {
+            if (embedFromData.contains("playhydrax.com") || embedFromData.contains("abyssplayer.com")) {
+                if (extractAbyss(embedFromData, refererUrl, subtitleCallback, callback)) return true
+            } else {
+                loadExtractor(embedFromData, refererUrl, subtitleCallback, callback)
+                return true
+            }
         }
 
-        val pageText = app.get(refererUrl, headers = headers).text
+        val pageText = try {
+            app.get(refererUrl, headers = headers).text
+        } catch (_: Exception) { "" }
+        if (pageText.isBlank()) return foundAny
+
         val unescaped = pageText.replace("\\\"", "\"").replace("\\/", "/")
 
         val activeShare = Regex("""["']embedUrl["']:\s*["']https?://kotakajaib\.me/(?:embed|file)/([a-zA-Z0-9_-]+)""").find(unescaped)?.groupValues?.getOrNull(1)
@@ -325,6 +339,20 @@ class PusatFilm : MainAPI() {
 
         for (share in shares) {
             extractKotakAjaib(share, refererUrl, subtitleCallback, callback)
+        }
+
+        val otherEmbeds = Regex("""["']embedUrl["']:\s*["'](https?://[^"']+)["']""").findAll(unescaped)
+            .map { it.groupValues[1] }
+            .filter { !it.contains("kotakajaib.me") }
+            .distinct()
+            .toList()
+
+        for (otherEmbed in otherEmbeds) {
+            if (otherEmbed.contains("playhydrax.com") || otherEmbed.contains("abyssplayer.com")) {
+                extractAbyss(otherEmbed, refererUrl, subtitleCallback, callback)
+            } else {
+                loadExtractor(otherEmbed, refererUrl, subtitleCallback, callback)
+            }
         }
 
         return true

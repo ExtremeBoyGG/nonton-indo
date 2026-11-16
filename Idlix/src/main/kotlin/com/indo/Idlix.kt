@@ -158,11 +158,13 @@ class Idlix : MainAPI() {
                                 for (j in 0 until episodesArray.length()) {
                                     val ep = episodesArray.optJSONObject(j) ?: continue
                                     val epNum = ep.optInt("episodeNumber", 0)
+                                    val epId = ep.optString("id", "")
                                     if (epNum > 0) {
                                         val epName = ep.optString("name").ifBlank { ep.optString("title") }.ifBlank { "S${sNum}E$epNum" }
                                         val stillPath = ep.optString("stillPath", "")
                                         val still = if (stillPath.isNotBlank()) "https://image.tmdb.org/t/p/w500$stillPath" else null
-                                        episodeUrls.add(newEpisode(fixUrl("/series/$slug/season/$sNum/episode/$epNum")) {
+                                        val epUrl = fixUrl("/series/$slug/season/$sNum/episode/$epNum") + (if (epId.isNotBlank()) "#episodeId=$epId" else "")
+                                        episodeUrls.add(newEpisode(epUrl) {
                                             this.name = epName
                                             this.episode = epNum
                                             this.season = sNum
@@ -211,7 +213,9 @@ class Idlix : MainAPI() {
                         }
                     } else emptyList()
 
-                    return newMovieLoadResponse(title, url, TvType.Movie, url) {
+                    val movieId = movieJson.optString("id", "")
+                    val movieData = url + (if (movieId.isNotBlank()) "#movieId=$movieId" else "")
+                    return newMovieLoadResponse(title, url, TvType.Movie, movieData) {
                         posterUrl = poster
                         backgroundPosterUrl = backdrop
                         this.plot = plot
@@ -315,21 +319,25 @@ class Idlix : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        val directEpId = Regex("""#episodeId=([a-zA-Z0-9_-]+)""").find(data)?.groupValues?.getOrNull(1)
+        val directMovieId = Regex("""#movieId=([a-zA-Z0-9_-]+)""").find(data)?.groupValues?.getOrNull(1)
+        val cleanData = data.substringBefore("#")
+
         val slug: String
         val contentType: String
         val extra: Map<String, String>
 
-        val episodeMatch = Regex("/series/([^/]+)/season/(\\d+)/episode/(\\d+)").find(data)
+        val episodeMatch = Regex("/series/([^/]+)/season/(\\d+)/episode/(\\d+)").find(cleanData)
         if (episodeMatch != null) {
             slug = episodeMatch.groupValues[1]
             contentType = "tv_series"
             extra = mapOf("season" to episodeMatch.groupValues[2], "episode" to episodeMatch.groupValues[3])
-        } else if (data.contains("/series/")) {
-            slug = data.substringAfter("/series/").substringBefore("/").substringBefore("?")
+        } else if (cleanData.contains("/series/")) {
+            slug = cleanData.substringAfter("/series/").substringBefore("/").substringBefore("?")
             contentType = "tv_series"
             extra = emptyMap()
         } else {
-            slug = data.substringAfter("/movie/").substringBefore("/").substringBefore("?")
+            slug = cleanData.substringAfter("/movie/").substringBefore("/").substringBefore("?")
             contentType = "movie"
             extra = emptyMap()
         }
@@ -339,37 +347,74 @@ class Idlix : MainAPI() {
         else if (extra.containsKey("season")) "$mainUrl/series/$slug/season/${extra["season"]}/episode/${extra["episode"]}"
         else "$mainUrl/series/$slug"
 
-        var cookieHeader = emptyMap<String, String>()
         try {
-            val pageResp = app.get(pageUrl, interceptor = cfKiller)
-            val setCookie = pageResp.headers["set-cookie"].orEmpty()
-            val did = Regex("""\bdid=([^;]+)""").find(setCookie)?.groupValues?.getOrNull(1)
-            if (!did.isNullOrBlank()) {
-                cookieHeader = mapOf("Cookie" to "did=$did")
-            }
+            app.get(pageUrl, interceptor = cfKiller)
         } catch (_: Exception) {}
 
         val contentId: String
         try {
-            val apiPath = if (contentType == "movie") "api/movies/$slug"
-            else if (extra.containsKey("season")) "api/series/$slug/season/${extra["season"]}/episode/${extra["episode"]}"
-            else "api/series/$slug"
-            val detailResp = app.get("$mainUrl/$apiPath", headers = apiHeaders + mapOf("Referer" to "$pageUrl/") + cookieHeader, interceptor = cfKiller)
-            val detailJson = JSONObject(detailResp.text)
-            contentId = detailJson.optJSONObject("episode")?.optString("id", "")?.ifBlank { null }
-                ?: detailJson.optString("id", "")
+            contentId = when {
+                !directEpId.isNullOrBlank() -> directEpId
+                !directMovieId.isNullOrBlank() -> directMovieId
+                contentType == "movie" -> {
+                    val movieResp = app.get("$mainUrl/api/movies/$slug", headers = apiHeaders + mapOf("Referer" to "$pageUrl/"), interceptor = cfKiller)
+                    JSONObject(movieResp.text).optString("id", "")
+                }
+                extra.containsKey("season") -> {
+                    val sNum = extra["season"] ?: "1"
+                    val epNum = extra["episode"]?.toIntOrNull() ?: 1
+                    var matchedId = ""
+                    try {
+                        val seasonResp = app.get("$mainUrl/api/series/$slug/season/$sNum", headers = apiHeaders + mapOf("Referer" to "$pageUrl/"), interceptor = cfKiller)
+                        val seasonJson = JSONObject(seasonResp.text)
+                        val episodes = seasonJson.optJSONObject("season")?.optJSONArray("episodes")
+                            ?: seasonJson.optJSONArray("episodes")
+                        if (episodes != null) {
+                            for (i in 0 until episodes.length()) {
+                                val ep = episodes.optJSONObject(i) ?: continue
+                                if (ep.optInt("episodeNumber", 0) == epNum) {
+                                    matchedId = ep.optString("id", "")
+                                    break
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+
+                    if (matchedId.isBlank()) {
+                        try {
+                            val seriesResp = app.get("$mainUrl/api/series/$slug", headers = apiHeaders + mapOf("Referer" to "$pageUrl/"), interceptor = cfKiller)
+                            val seriesJson = JSONObject(seriesResp.text)
+                            val defEps = seriesJson.optJSONObject("defaultSeason")?.optJSONArray("episodes")
+                            if (defEps != null) {
+                                for (i in 0 until defEps.length()) {
+                                    val ep = defEps.optJSONObject(i) ?: continue
+                                    if (ep.optInt("episodeNumber", 0) == epNum) {
+                                        matchedId = ep.optString("id", "")
+                                        break
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    matchedId
+                }
+                else -> {
+                    val seriesResp = app.get("$mainUrl/api/series/$slug", headers = apiHeaders + mapOf("Referer" to "$pageUrl/"), interceptor = cfKiller)
+                    val seriesJson = JSONObject(seriesResp.text)
+                    seriesJson.optJSONObject("defaultSeason")?.optJSONArray("episodes")?.optJSONObject(0)?.optString("id", "")
+                        ?: seriesJson.optString("id", "")
+                }
+            }
             if (contentId.isBlank()) return false
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return false
         }
 
-        var streamUrl: String? = null
-        var subtitles: List<Pair<String, String>> = emptyList()
         try {
-            val playInfoType = if (extra.containsKey("season")) "episode" else contentType
+            val playInfoType = if (contentType == "tv_series" || extra.containsKey("season") || !directEpId.isNullOrBlank()) "episode" else "movie"
             val playInfoResp = app.get(
                 "$mainUrl/api/watch/play-info/$playInfoType/$contentId",
-                headers = apiHeaders + mapOf("Referer" to "$pageUrl/") + cookieHeader,
+                headers = apiHeaders + mapOf("Referer" to "$pageUrl/"),
                 interceptor = cfKiller
             )
             val playInfo = JSONObject(playInfoResp.text)
@@ -384,42 +429,79 @@ class Idlix : MainAPI() {
                 if (waitMs > 0) delay(waitMs + 2000)
             }
 
-            var claimJson = postClaim(gateToken, pageUrl, cookieHeader)
+            var claimJson = postClaim(gateToken, pageUrl)
 
             if (claimJson.optString("kind") == "pending") {
                 val remainingMs = claimJson.optLong("remainingMs", 0)
                 if (remainingMs > 0) delay(remainingMs + 2000)
-                claimJson = postClaim(gateToken, pageUrl, cookieHeader)
+                claimJson = postClaim(gateToken, pageUrl)
             }
 
-            val redeemUrl = claimJson.optString("redeemUrl", "")
+            val rawRedeemUrl = claimJson.optString("redeemUrl", "")
             val claim = claimJson.optString("claim", "")
             val initialMaster = claimJson.optString("initialMasterUrl", "")
 
-            if (redeemUrl.isNotBlank() && claim.isNotBlank()) {
+            var streamUrl: String? = null
+            var subtitles: List<Pair<String, String>> = emptyList()
+
+            if (claim.isNotBlank()) {
+                val fullRedeemUrl = when {
+                    rawRedeemUrl.startsWith("http") -> rawRedeemUrl
+                    rawRedeemUrl.isNotBlank() -> "$mainUrl" + (if (rawRedeemUrl.startsWith("/api")) "" else "/api") + rawRedeemUrl
+                    else -> "$mainUrl/api/watch/session/redeem"
+                }
+
+                val redeemPayload = JSONObject().put("claim", claim).put("mode", "browser").toString()
+
                 try {
-                    val pentosResp = app.post(
-                        redeemUrl,
+                    val redeemResp = app.post(
+                        fullRedeemUrl,
                         headers = mapOf(
                             "Origin" to mainUrl,
                             "Referer" to "$mainUrl/",
                             "Content-Type" to "application/json"
                         ),
-                        json = JsonAsString("""{"claim":"$claim"}""")
+                        json = JsonAsString(redeemPayload),
+                        interceptor = cfKiller
                     )
-                    val pentosText = pentosResp.text
-                    val pentosJson = JSONObject(pentosText)
-                    streamUrl = pentosJson.optString("url", "").ifBlank { null }
-                    val subsArray = pentosJson.optJSONArray("subtitles")
-                    subtitles = if (subsArray != null) {
-                        (0 until subsArray.length()).mapNotNull { i ->
+                    val redeemJson = JSONObject(redeemResp.text)
+                    streamUrl = redeemJson.optString("url", "").ifBlank { null }
+                    val subsArray = redeemJson.optJSONArray("subtitles")
+                    if (subsArray != null) {
+                        subtitles = (0 until subsArray.length()).mapNotNull { i ->
                             val sub = subsArray.optJSONObject(i) ?: return@mapNotNull null
                             val lang = sub.optString("label").ifBlank { sub.optString("lang", "") }
                             val path = sub.optString("path", "")
                             if (lang.isNotBlank() && path.isNotBlank()) Pair(lang, path) else null
                         }
-                    } else emptyList()
+                    }
                 } catch (_: Exception) {}
+
+                if (streamUrl == null && !fullRedeemUrl.contains("majorplay.net")) {
+                    try {
+                        val pentosResp = app.post(
+                            "https://e2e.majorplay.net/api/play",
+                            headers = mapOf(
+                                "Origin" to mainUrl,
+                                "Referer" to "$mainUrl/",
+                                "Content-Type" to "application/json"
+                            ),
+                            json = JsonAsString(redeemPayload)
+                        )
+                        val pentosJson = JSONObject(pentosResp.text)
+                        streamUrl = pentosJson.optString("url", "").ifBlank { null }
+                        val subsArray = pentosJson.optJSONArray("subtitles")
+                        if (subsArray != null && subtitles.isEmpty()) {
+                            subtitles = (0 until subsArray.length()).mapNotNull { i ->
+                                val sub = subsArray.optJSONObject(i) ?: return@mapNotNull null
+                                val lang = sub.optString("label").ifBlank { sub.optString("lang", "") }
+                                val path = sub.optString("path", "")
+                                if (lang.isNotBlank() && path.isNotBlank()) Pair(lang, path) else null
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
                 if (streamUrl != null) {
                     subtitles.forEach { (lang, path) ->
                         subtitleCallback(newSubtitleFile(lang, path))
@@ -428,6 +510,10 @@ class Idlix : MainAPI() {
                     val qualityName = if (maxHeight > 0) "Idlix - ${maxHeight}p" else "Idlix"
                     callback(newExtractorLink("Idlix", qualityName, streamUrl, type = ExtractorLinkType.M3U8) {
                         this.referer = "$mainUrl/"
+                        this.headers = mapOf(
+                            "Origin" to mainUrl,
+                            "Referer" to "$mainUrl/"
+                        )
                     })
                     return true
                 }
@@ -436,24 +522,28 @@ class Idlix : MainAPI() {
             if (initialMaster.isNotBlank()) {
                 callback(newExtractorLink("Idlix", "Idlix", initialMaster, type = ExtractorLinkType.M3U8) {
                     this.referer = "$mainUrl/"
+                    this.headers = mapOf(
+                        "Origin" to mainUrl,
+                        "Referer" to "$mainUrl/"
+                    )
                 })
                 return true
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return false
         }
 
         return false
     }
 
-    private suspend fun postClaim(gateToken: String, pageUrl: String, cookieHeader: Map<String, String>): JSONObject {
+    private suspend fun postClaim(gateToken: String, pageUrl: String): JSONObject {
         val claimResp = app.post(
             "$mainUrl/api/watch/session/claim",
             headers = apiHeaders + mapOf(
                 "Origin" to mainUrl,
                 "Referer" to "$pageUrl/",
                 "Content-Type" to "application/json"
-            ) + cookieHeader,
+            ),
             json = JsonAsString("""{"gateToken":"$gateToken"}"""),
             interceptor = cfKiller
         )
