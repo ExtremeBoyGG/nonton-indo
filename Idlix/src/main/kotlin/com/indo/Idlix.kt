@@ -22,6 +22,7 @@ class Idlix : MainAPI() {
     private val cfKiller = CloudflareKiller()
 
     private val apiHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
         "Accept" to "application/json",
         "Referer" to "$mainUrl/"
     )
@@ -426,16 +427,20 @@ class Idlix : MainAPI() {
             if (kind == "gate") {
                 val unlockAt = playInfo.optLong("unlockAt", 0L)
                 val serverNow = playInfo.optLong("serverNow", 0L)
-                val waitMs = if (unlockAt > 0 && serverNow > 0) unlockAt - serverNow else 15000L
-                if (waitMs > 0) delay(minOf(waitMs + 1000L, 16000L))
+                val waitMs = if (unlockAt > 0 && serverNow > 0) maxOf(0L, unlockAt - serverNow) else 0L
+                if (waitMs in 1L..15500L) {
+                    delay(waitMs + 300L)
+                }
             }
 
             var claimJson = postClaim(gateToken, pageUrl)
 
-            if (claimJson.optString("kind") == "pending") {
-                val remainingMs = claimJson.optLong("remainingMs", 0)
-                if (remainingMs > 0) delay(minOf(remainingMs + 500L, 8000L))
+            var retries = 0
+            while (claimJson.optString("kind") == "pending" && retries < 3) {
+                val remainingMs = claimJson.optLong("remainingMs", 1000L)
+                delay(minOf(maxOf(500L, remainingMs + 200L), 3000L))
                 claimJson = postClaim(gateToken, pageUrl)
+                retries++
             }
 
             val rawRedeemUrl = claimJson.optString("redeemUrl", "")
@@ -458,6 +463,7 @@ class Idlix : MainAPI() {
                     val redeemResp = app.post(
                         fullRedeemUrl,
                         headers = mapOf(
+                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
                             "Origin" to mainUrl,
                             "Referer" to "$mainUrl/",
                             "Content-Type" to "application/json"
@@ -483,6 +489,7 @@ class Idlix : MainAPI() {
                         val pentosResp = app.post(
                             "https://e2e.majorplay.net/api/play",
                             headers = mapOf(
+                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
                                 "Origin" to mainUrl,
                                 "Referer" to "$mainUrl/",
                                 "Content-Type" to "application/json"
@@ -549,54 +556,75 @@ class Idlix : MainAPI() {
         maxHeight: Int,
         callback: (ExtractorLink) -> Unit
     ) {
-        var emittedAny = false
-        try {
-            val tokenQuery = streamUrl.substringAfter("?", "")
-            val baseUrl = streamUrl.substringBeforeLast("/") + "/"
+        val streamHeaders = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Origin" to mainUrl,
+            "Referer" to "$mainUrl/"
+        )
+        val tokenQuery = streamUrl.substringAfter("?", "")
+        val streamBaseUri = try { java.net.URI.create(streamUrl) } catch (_: Exception) { null }
 
-            val masterResp = app.get(
-                streamUrl,
-                headers = mapOf(
-                    "Origin" to mainUrl,
-                    "Referer" to "$mainUrl/"
-                ),
-                interceptor = cfKiller
-            )
-            val masterText = masterResp.text
+        try {
+            val masterText = app.get(streamUrl, headers = streamHeaders).text
 
             if (masterText.contains("#EXT-X-STREAM-INF")) {
-                val lines = masterText.lines()
+                val lines = masterText.lines().toMutableList()
                 var currentRes: String? = null
+                val audioDataUris = mutableMapOf<String, String>()
 
-                for (line in lines) {
-                    val trimmed = line.trim()
-                    if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
-                        val resMatch = Regex("""RESOLUTION=(\d+)x(\d+)""").find(trimmed)
-                        currentRes = resMatch?.groupValues?.getOrNull(2)
-                    } else if (!trimmed.startsWith("#") && trimmed.isNotBlank()) {
-                        val subRawUrl = if (trimmed.startsWith("http")) trimmed else "$baseUrl$trimmed"
-                        val subFullUrl = if (tokenQuery.isNotBlank() && !subRawUrl.contains("t=")) {
-                            if (subRawUrl.contains("?")) "$subRawUrl&$tokenQuery" else "$subRawUrl?$tokenQuery"
-                        } else subRawUrl
-
-                        try {
-                            val subResp = app.get(
-                                subFullUrl,
-                                headers = mapOf(
-                                    "Origin" to mainUrl,
-                                    "Referer" to "$mainUrl/"
-                                ),
-                                interceptor = cfKiller
+                // 1. Process and rewrite audio tracks if present
+                for (i in lines.indices) {
+                    val line = lines[i].trim()
+                    if (line.startsWith("#EXT-X-MEDIA:") && line.contains("TYPE=AUDIO")) {
+                        val uriMatch = Regex("""URI="([^"]+)"""").find(line)
+                        if (uriMatch != null) {
+                            val rawAudioUri = uriMatch.groupValues[1]
+                            val fullAudioUrl = appendToken(
+                                streamBaseUri?.resolve(rawAudioUri)?.toString() ?: rawAudioUri,
+                                tokenQuery
                             )
-                            val subText = subResp.text
+                            val audioDataUri = audioDataUris.getOrPut(rawAudioUri) {
+                                try {
+                                    val aText = app.get(fullAudioUrl, headers = streamHeaders).text
+                                    val rewrittenA = rewriteMediaPlaylist(aText, fullAudioUrl, tokenQuery)
+                                    val b64 = android.util.Base64.encodeToString(
+                                        rewrittenA.toByteArray(Charsets.UTF_8),
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                    "data:application/vnd.apple.mpegurl;base64,$b64"
+                                } catch (_: Exception) {
+                                    fullAudioUrl
+                                }
+                            }
+                            lines[i] = line.replace("""URI="$rawAudioUri"""", """URI="$audioDataUri"""")
+                        }
+                    }
+                }
 
-                            if (subText.contains("#EXTINF")) {
-                                val rewrittenPlaylist = rewritePlaylist(subText, baseUrl, tokenQuery)
+                // 2. Process and rewrite video variant streams
+                for (i in lines.indices) {
+                    val line = lines[i].trim()
+                    if (line.startsWith("#EXT-X-STREAM-INF")) {
+                        val resMatch = Regex("""RESOLUTION=(\d+)x(\d+)""").find(line)
+                        currentRes = resMatch?.groupValues?.getOrNull(2)
+                    } else if (!line.startsWith("#") && line.isNotBlank()) {
+                        val rawVideoUri = line
+                        val fullVideoUrl = appendToken(
+                            streamBaseUri?.resolve(rawVideoUri)?.toString() ?: rawVideoUri,
+                            tokenQuery
+                        )
+                        try {
+                            val vText = app.get(fullVideoUrl, headers = streamHeaders).text
+                            if (vText.contains("#EXTINF")) {
+                                val rewrittenV = rewriteMediaPlaylist(vText, fullVideoUrl, tokenQuery)
                                 val b64 = android.util.Base64.encodeToString(
-                                    rewrittenPlaylist.toByteArray(Charsets.UTF_8),
+                                    rewrittenV.toByteArray(Charsets.UTF_8),
                                     android.util.Base64.NO_WRAP
                                 )
-                                val dataUri = "data:application/vnd.apple.mpegurl;base64,$b64"
+                                val videoDataUri = "data:application/vnd.apple.mpegurl;base64,$b64"
+
+                                // Replace raw video uri with rewritten data URI in master playlist
+                                lines[i] = videoDataUri
 
                                 val qNum = currentRes?.toIntOrNull() ?: maxHeight
                                 val qName = "Idlix - ${qNum}p"
@@ -608,7 +636,7 @@ class Idlix : MainAPI() {
                                     else -> Qualities.Unknown.value
                                 }
 
-                                callback(newExtractorLink("Idlix", qName, dataUri, type = ExtractorLinkType.M3U8) {
+                                callback(newExtractorLink("Idlix", qName, videoDataUri, type = ExtractorLinkType.M3U8) {
                                     this.quality = qVal
                                     this.referer = "$mainUrl/"
                                     this.headers = mapOf(
@@ -616,16 +644,34 @@ class Idlix : MainAPI() {
                                         "Referer" to "$mainUrl/"
                                     )
                                 })
-                                emittedAny = true
                             }
                         } catch (_: Exception) {}
                         currentRes = null
                     }
                 }
+
+                // 3. Emit master playlist (contains full video + audio tracks)
+                try {
+                    val rewrittenMaster = lines.joinToString("\n")
+                    val masterB64 = android.util.Base64.encodeToString(
+                        rewrittenMaster.toByteArray(Charsets.UTF_8),
+                        android.util.Base64.NO_WRAP
+                    )
+                    val masterDataUri = "data:application/vnd.apple.mpegurl;base64,$masterB64"
+                    callback(newExtractorLink("Idlix", "Idlix - Auto (Full Audio/Video)", masterDataUri, type = ExtractorLinkType.M3U8) {
+                        this.quality = if (maxHeight >= 1080) Qualities.P1080.value else Qualities.P720.value
+                        this.referer = "$mainUrl/"
+                        this.headers = mapOf(
+                            "Origin" to mainUrl,
+                            "Referer" to "$mainUrl/"
+                        )
+                    })
+                } catch (_: Exception) {}
+
             } else if (masterText.contains("#EXTINF")) {
-                val rewrittenPlaylist = rewritePlaylist(masterText, baseUrl, tokenQuery)
+                val rewritten = rewriteMediaPlaylist(masterText, streamUrl, tokenQuery)
                 val b64 = android.util.Base64.encodeToString(
-                    rewrittenPlaylist.toByteArray(Charsets.UTF_8),
+                    rewritten.toByteArray(Charsets.UTF_8),
                     android.util.Base64.NO_WRAP
                 )
                 val dataUri = "data:application/vnd.apple.mpegurl;base64,$b64"
@@ -645,10 +691,10 @@ class Idlix : MainAPI() {
                         "Referer" to "$mainUrl/"
                     )
                 })
-                emittedAny = true
             }
         } catch (_: Exception) {}
 
+        // 4. Always emit direct stream URL as fallback
         val fallbackQuality = if (maxHeight > 0) "Idlix (Direct) - ${maxHeight}p" else "Idlix (Direct)"
         callback(newExtractorLink("Idlix", fallbackQuality, streamUrl, type = ExtractorLinkType.M3U8) {
             this.referer = "$mainUrl/"
@@ -659,30 +705,39 @@ class Idlix : MainAPI() {
         })
     }
 
-    private fun rewritePlaylist(playlist: String, baseUrl: String, tokenQuery: String): String {
-        return playlist.lines().joinToString("\n") { line ->
+    private fun appendToken(url: String, tokenQuery: String): String {
+        if (tokenQuery.isBlank() || url.contains("t=")) return url
+        val sep = if (url.contains("?")) "&" else "?"
+        return "$url$sep$tokenQuery"
+    }
+
+    private fun rewriteMediaPlaylist(playlistText: String, subUrl: String, tokenQuery: String): String {
+        val baseUri = try { java.net.URI.create(subUrl) } catch (_: Exception) { null }
+        return playlistText.lines().joinToString("\n") { line ->
             val trimmed = line.trim()
             when {
+                trimmed.startsWith("#EXT-X-MAP:") -> {
+                    val m = Regex("""URI="([^"]+)"""").find(trimmed)
+                    if (m != null) {
+                        val rawUri = m.groupValues[1]
+                        val fullUri = baseUri?.resolve(rawUri)?.toString() ?: rawUri
+                        val withToken = appendToken(fullUri, tokenQuery)
+                        line.replace("""URI="$rawUri"""", """URI="$withToken"""")
+                    } else line
+                }
                 trimmed.startsWith("#EXT-X-KEY:") -> {
-                    val keyUriMatch = Regex("""URI="([^"]+)"""").find(trimmed)
-                    if (keyUriMatch != null && tokenQuery.isNotBlank()) {
-                        val origKey = keyUriMatch.groupValues[1]
-                        val fullKey = if (origKey.startsWith("http")) origKey else "$baseUrl$origKey"
-                        val keyWithToken = if (!fullKey.contains("t=")) {
-                            if (fullKey.contains("?")) "$fullKey&$tokenQuery" else "$fullKey?$tokenQuery"
-                        } else fullKey
-                        line.replace("""URI="$origKey"""", """URI="$keyWithToken"""")
-                    } else {
-                        line
-                    }
+                    val m = Regex("""URI="([^"]+)"""").find(trimmed)
+                    if (m != null) {
+                        val rawUri = m.groupValues[1]
+                        val fullUri = baseUri?.resolve(rawUri)?.toString() ?: rawUri
+                        val withToken = appendToken(fullUri, tokenQuery)
+                        line.replace("""URI="$rawUri"""", """URI="$withToken"""")
+                    } else line
                 }
                 trimmed.startsWith("#") || trimmed.isBlank() -> line
                 else -> {
-                    val fullSeg = if (trimmed.startsWith("http")) trimmed else "$baseUrl$trimmed"
-                    val withToken = if (tokenQuery.isNotBlank() && !fullSeg.contains("t=")) {
-                        if (fullSeg.contains("?")) "$fullSeg&$tokenQuery" else "$fullSeg?$tokenQuery"
-                    } else fullSeg
-                    "$withToken#.ts"
+                    val fullUri = baseUri?.resolve(trimmed)?.toString() ?: trimmed
+                    appendToken(fullUri, tokenQuery)
                 }
             }
         }
