@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.JsonAsString
 import kotlinx.coroutines.delay
@@ -426,14 +427,14 @@ class Idlix : MainAPI() {
                 val unlockAt = playInfo.optLong("unlockAt", 0L)
                 val serverNow = playInfo.optLong("serverNow", 0L)
                 val waitMs = if (unlockAt > 0 && serverNow > 0) unlockAt - serverNow else 15000L
-                if (waitMs > 0) delay(waitMs + 2000)
+                if (waitMs > 0) delay(minOf(waitMs + 1000L, 16000L))
             }
 
             var claimJson = postClaim(gateToken, pageUrl)
 
             if (claimJson.optString("kind") == "pending") {
                 val remainingMs = claimJson.optLong("remainingMs", 0)
-                if (remainingMs > 0) delay(remainingMs + 2000)
+                if (remainingMs > 0) delay(minOf(remainingMs + 500L, 8000L))
                 claimJson = postClaim(gateToken, pageUrl)
             }
 
@@ -502,31 +503,24 @@ class Idlix : MainAPI() {
                     } catch (_: Exception) {}
                 }
 
+                if (streamUrl == null && initialMaster.isNotBlank()) {
+                    streamUrl = initialMaster
+                }
+
                 if (streamUrl != null) {
                     subtitles.forEach { (lang, path) ->
-                        subtitleCallback(newSubtitleFile(lang, path))
+                        val subUrl = if (path.startsWith("http")) path else fixUrl(path)
+                        subtitleCallback(newSubtitleFile(lang, subUrl))
                     }
                     val maxHeight = claimJson.optInt("maxHeight", 720)
-                    val qualityName = if (maxHeight > 0) "Idlix - ${maxHeight}p" else "Idlix"
-                    callback(newExtractorLink("Idlix", qualityName, streamUrl, type = ExtractorLinkType.M3U8) {
-                        this.referer = "$mainUrl/"
-                        this.headers = mapOf(
-                            "Origin" to mainUrl,
-                            "Referer" to "$mainUrl/"
-                        )
-                    })
+                    processHlsStream(streamUrl, maxHeight, callback)
                     return true
                 }
             }
 
             if (initialMaster.isNotBlank()) {
-                callback(newExtractorLink("Idlix", "Idlix", initialMaster, type = ExtractorLinkType.M3U8) {
-                    this.referer = "$mainUrl/"
-                    this.headers = mapOf(
-                        "Origin" to mainUrl,
-                        "Referer" to "$mainUrl/"
-                    )
-                })
+                val maxHeight = claimJson.optInt("maxHeight", 720)
+                processHlsStream(initialMaster, maxHeight, callback)
                 return true
             }
         } catch (_: Exception) {
@@ -548,6 +542,150 @@ class Idlix : MainAPI() {
             interceptor = cfKiller
         )
         return JSONObject(claimResp.text)
+    }
+
+    private suspend fun processHlsStream(
+        streamUrl: String,
+        maxHeight: Int,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        var emittedAny = false
+        try {
+            val tokenQuery = streamUrl.substringAfter("?", "")
+            val baseUrl = streamUrl.substringBeforeLast("/") + "/"
+
+            val masterResp = app.get(
+                streamUrl,
+                headers = mapOf(
+                    "Origin" to mainUrl,
+                    "Referer" to "$mainUrl/"
+                ),
+                interceptor = cfKiller
+            )
+            val masterText = masterResp.text
+
+            if (masterText.contains("#EXT-X-STREAM-INF")) {
+                val lines = masterText.lines()
+                var currentRes: String? = null
+
+                for (line in lines) {
+                    val trimmed = line.trim()
+                    if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
+                        val resMatch = Regex("""RESOLUTION=(\d+)x(\d+)""").find(trimmed)
+                        currentRes = resMatch?.groupValues?.getOrNull(2)
+                    } else if (!trimmed.startsWith("#") && trimmed.isNotBlank()) {
+                        val subRawUrl = if (trimmed.startsWith("http")) trimmed else "$baseUrl$trimmed"
+                        val subFullUrl = if (tokenQuery.isNotBlank() && !subRawUrl.contains("t=")) {
+                            if (subRawUrl.contains("?")) "$subRawUrl&$tokenQuery" else "$subRawUrl?$tokenQuery"
+                        } else subRawUrl
+
+                        try {
+                            val subResp = app.get(
+                                subFullUrl,
+                                headers = mapOf(
+                                    "Origin" to mainUrl,
+                                    "Referer" to "$mainUrl/"
+                                ),
+                                interceptor = cfKiller
+                            )
+                            val subText = subResp.text
+
+                            if (subText.contains("#EXTINF")) {
+                                val rewrittenPlaylist = rewritePlaylist(subText, baseUrl, tokenQuery)
+                                val b64 = android.util.Base64.encodeToString(
+                                    rewrittenPlaylist.toByteArray(Charsets.UTF_8),
+                                    android.util.Base64.NO_WRAP
+                                )
+                                val dataUri = "data:application/vnd.apple.mpegurl;base64,$b64"
+
+                                val qNum = currentRes?.toIntOrNull() ?: maxHeight
+                                val qName = "Idlix - ${qNum}p"
+                                val qVal = when {
+                                    qNum >= 1080 -> Qualities.P1080.value
+                                    qNum >= 720 -> Qualities.P720.value
+                                    qNum >= 480 -> Qualities.P480.value
+                                    qNum >= 360 -> Qualities.P360.value
+                                    else -> Qualities.Unknown.value
+                                }
+
+                                callback(newExtractorLink("Idlix", qName, dataUri, type = ExtractorLinkType.M3U8) {
+                                    this.quality = qVal
+                                    this.referer = "$mainUrl/"
+                                    this.headers = mapOf(
+                                        "Origin" to mainUrl,
+                                        "Referer" to "$mainUrl/"
+                                    )
+                                })
+                                emittedAny = true
+                            }
+                        } catch (_: Exception) {}
+                        currentRes = null
+                    }
+                }
+            } else if (masterText.contains("#EXTINF")) {
+                val rewrittenPlaylist = rewritePlaylist(masterText, baseUrl, tokenQuery)
+                val b64 = android.util.Base64.encodeToString(
+                    rewrittenPlaylist.toByteArray(Charsets.UTF_8),
+                    android.util.Base64.NO_WRAP
+                )
+                val dataUri = "data:application/vnd.apple.mpegurl;base64,$b64"
+                val qualityName = if (maxHeight > 0) "Idlix - ${maxHeight}p" else "Idlix"
+                val qVal = when {
+                    maxHeight >= 1080 -> Qualities.P1080.value
+                    maxHeight >= 720 -> Qualities.P720.value
+                    maxHeight >= 480 -> Qualities.P480.value
+                    maxHeight >= 360 -> Qualities.P360.value
+                    else -> Qualities.Unknown.value
+                }
+                callback(newExtractorLink("Idlix", qualityName, dataUri, type = ExtractorLinkType.M3U8) {
+                    this.quality = qVal
+                    this.referer = "$mainUrl/"
+                    this.headers = mapOf(
+                        "Origin" to mainUrl,
+                        "Referer" to "$mainUrl/"
+                    )
+                })
+                emittedAny = true
+            }
+        } catch (_: Exception) {}
+
+        val fallbackQuality = if (maxHeight > 0) "Idlix (Direct) - ${maxHeight}p" else "Idlix (Direct)"
+        callback(newExtractorLink("Idlix", fallbackQuality, streamUrl, type = ExtractorLinkType.M3U8) {
+            this.referer = "$mainUrl/"
+            this.headers = mapOf(
+                "Origin" to mainUrl,
+                "Referer" to "$mainUrl/"
+            )
+        })
+    }
+
+    private fun rewritePlaylist(playlist: String, baseUrl: String, tokenQuery: String): String {
+        return playlist.lines().joinToString("\n") { line ->
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("#EXT-X-KEY:") -> {
+                    val keyUriMatch = Regex("""URI="([^"]+)"""").find(trimmed)
+                    if (keyUriMatch != null && tokenQuery.isNotBlank()) {
+                        val origKey = keyUriMatch.groupValues[1]
+                        val fullKey = if (origKey.startsWith("http")) origKey else "$baseUrl$origKey"
+                        val keyWithToken = if (!fullKey.contains("t=")) {
+                            if (fullKey.contains("?")) "$fullKey&$tokenQuery" else "$fullKey?$tokenQuery"
+                        } else fullKey
+                        line.replace("""URI="$origKey"""", """URI="$keyWithToken"""")
+                    } else {
+                        line
+                    }
+                }
+                trimmed.startsWith("#") || trimmed.isBlank() -> line
+                else -> {
+                    val fullSeg = if (trimmed.startsWith("http")) trimmed else "$baseUrl$trimmed"
+                    val withToken = if (tokenQuery.isNotBlank() && !fullSeg.contains("t=")) {
+                        if (fullSeg.contains("?")) "$fullSeg&$tokenQuery" else "$fullSeg?$tokenQuery"
+                    } else fullSeg
+                    "$withToken#.ts"
+                }
+            }
+        }
     }
 
     private fun parseQuality(q: String): Int {

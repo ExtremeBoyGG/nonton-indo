@@ -166,8 +166,9 @@ class PusatFilm : MainAPI() {
                     val eNum = eMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
 
                     val titleMatch = Regex("""\b\d+m\s*(.+)$""").find(epText)?.groupValues?.getOrNull(1)?.trim()
-                    val epName = titleMatch?.ifBlank { null }
+                    val rawEpName = titleMatch?.ifBlank { null }
                         ?: (if (eNum != null) "Episode $eNum" else epText.ifBlank { "Episode" })
+                    val epName = cleanTitle(rawEpName)
 
                     newEpisode(epUrl) {
                         this.name = epName
@@ -264,7 +265,8 @@ class PusatFilm : MainAPI() {
                             for (eIdx in 0 until episodesArray.length()) {
                                 val epObj = episodesArray.optJSONObject(eIdx) ?: continue
                                 val eNum = epObj.optInt("number", eIdx + 1)
-                                val epName = epObj.optString("name", "").ifBlank { "Episode $eNum" }
+                                val rawEpName = epObj.optString("name", "").ifBlank { "Episode $eNum" }
+                                val epName = cleanTitle(rawEpName).ifBlank { "Episode $eNum" }
                                 val epOverview = epObj.optString("overview", "").ifBlank { null }
                                 val stillPath = epObj.optString("stillPath", "")
                                 val stillUrl = if (stillPath.isNotBlank()) "https://image.tmdb.org/t/p/w500$stillPath" else null
@@ -341,6 +343,41 @@ class PusatFilm : MainAPI() {
             extractKotakAjaib(share, refererUrl, subtitleCallback, callback)
         }
 
+        if (shares.isEmpty() && activeShare.isNullOrBlank()) {
+            val gateMatch = Regex(""""gate"\s*:\s*\{"titleId"\s*:\s*(\d+)\s*,\s*"episodeId"\s*:\s*(\d+)\}""").find(unescaped)
+                ?: Regex(""""titleId"\s*:\s*(\d+)\s*,\s*"episodeId"\s*:\s*(\d+)""").find(unescaped)
+            if (gateMatch != null) {
+                val titleId = gateMatch.groupValues[1].toIntOrNull()
+                val episodeId = gateMatch.groupValues[2].toIntOrNull()
+                if (titleId != null && episodeId != null) {
+                    try {
+                        val actionPayload = "[$titleId,$episodeId]"
+                        val actionRes = app.post(
+                            refererUrl,
+                            headers = mapOf(
+                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+                                "Next-Action" to "60a2b66e983b238072e46c78cb7ec6ecf3696283d1",
+                                "Content-Type" to "application/json",
+                                "Accept" to "text/x-component"
+                            ),
+                            json = JsonAsString(actionPayload)
+                        ).text
+                        val actionEmbed = Regex(""""embedUrl"\s*:\s*"([^"]+)"""").find(actionRes)?.groupValues?.getOrNull(1)
+                        if (!actionEmbed.isNullOrBlank()) {
+                            val actionShare = Regex("""kotakajaib\.me/(?:embed|file)/([a-zA-Z0-9_-]+)""").find(actionEmbed)?.groupValues?.getOrNull(1)
+                            if (!actionShare.isNullOrBlank()) {
+                                extractKotakAjaib(actionShare, refererUrl, subtitleCallback, callback)
+                            } else if (actionEmbed.contains("playhydrax.com") || actionEmbed.contains("abyssplayer.com")) {
+                                extractAbyss(actionEmbed, refererUrl, subtitleCallback, callback)
+                            } else {
+                                loadExtractor(actionEmbed, refererUrl, subtitleCallback, callback)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
         val otherEmbeds = Regex("""["']embedUrl["']:\s*["'](https?://[^"']+)["']""").findAll(unescaped)
             .map { it.groupValues[1] }
             .filter { !it.contains("kotakajaib.me") }
@@ -376,9 +413,16 @@ class PusatFilm : MainAPI() {
 
             val kp = embedDoc.selectFirst("#kp") ?: return
             val token = kp.attr("data-token").ifBlank { null } ?: return
-            val providers = kp.select("button[data-p]").map { it.attr("data-p") }.filter { it.isNotBlank() }
+            val rawProviders = kp.select("button[data-p]").map { it.attr("data-p") }.filter { it.isNotBlank() }
                 .distinct()
                 .ifEmpty { listOf("hydrax", "gdriveplayer") }
+
+            // Prioritize hydrax and gdriveplayer, filter out vikingfile (requires Turnstile captcha)
+            val providers = rawProviders.filter { !it.contains("vikingfile", ignoreCase = true) }
+                .sortedWith(
+                    compareByDescending<String> { it.contains("hydrax", ignoreCase = true) || it.contains("abyss", ignoreCase = true) }
+                        .thenByDescending { it.contains("gdriveplayer", ignoreCase = true) }
+                )
 
             for (provider in providers) {
                 try {
@@ -427,7 +471,7 @@ class PusatFilm : MainAPI() {
                 )
             ).text
 
-            val enc = Regex("""const\s+datas\s*=\s*"([^"]*)"""").find(areq)?.groupValues?.getOrNull(1) ?: return false
+            val enc = Regex("""(?:const|var|let)\s+datas\s*=\s*["']([^"']*)["']""").find(areq)?.groupValues?.getOrNull(1) ?: return false
 
             extractAbyssSubtitles(enc, subtitleCallback)
 
