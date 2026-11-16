@@ -7,6 +7,7 @@ import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.JsonAsString
+import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -99,7 +100,6 @@ class PusatFilm : MainAPI() {
         if (title.isBlank()) return null
 
         val isSeries = href.contains("/series/")
-        val tvType = if (isSeries) TvType.TvSeries else TvType.Movie
 
         return if (isSeries) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -120,9 +120,14 @@ class PusatFilm : MainAPI() {
             ?: name
         val title = cleanTitle(rawTitle)
 
+        val pageHtml = doc.html()
+
         val poster = doc.selectFirst("meta[property='og:image']")?.attr("content")?.ifBlank { null }
             ?: doc.selectFirst("img[src*='tmdb.org']")?.attr("src")?.ifBlank { null }
             ?: doc.selectFirst("img.poster")?.attr("src")?.ifBlank { null }
+            ?: Regex(""""posterPath"\s*:\s*"([^"\\]+)"""").find(pageHtml)?.groupValues?.getOrNull(1)?.let { "https://image.tmdb.org/t/p/w500$it" }
+
+        val backdrop = doc.selectFirst("meta[property='og:image']")?.attr("content")?.ifBlank { null }
 
         val plot = doc.selectFirst("meta[property='og:description']")?.attr("content")?.trim()
             ?: doc.selectFirst("p.leading-relaxed, .synopsis, [itemprop='description']")?.text()?.trim()
@@ -132,30 +137,40 @@ class PusatFilm : MainAPI() {
 
         val tags = doc.select("a[href*='/genre/']").map { it.text().trim() }.filter { it.isNotBlank() }
 
+        val voteAvg = Regex(""""voteAverage"\s*:\s*"([0-9.]+)"""").find(pageHtml)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
+        val score = Score.from10(voteAvg)
+
         val isSeries = url.contains("/series/")
 
         return if (isSeries) {
-            val episodes = doc.select("a[href*='/season/'][href*='/episode/']").mapNotNull { a ->
-                val epHref = a.attr("href").ifBlank { return@mapNotNull null }
-                val epUrl = fixUrlNull(epHref) ?: return@mapNotNull null
-                val epText = a.text().trim()
+            val seriesSlug = url.substringAfter("/series/").substringBefore("/").substringBefore("?")
+            val nextFEpisodes = extractSeasonsFromHtml(pageHtml, seriesSlug)
 
-                val sMatch = Regex("""/season/(\d+)""", RegexOption.IGNORE_CASE).find(epHref)
-                    ?: Regex("""S(\d+)""", RegexOption.IGNORE_CASE).find(epText)
-                val eMatch = Regex("""/episode/(\d+)""", RegexOption.IGNORE_CASE).find(epHref)
-                    ?: Regex("""E(\d+)""", RegexOption.IGNORE_CASE).find(epText)
+            val episodes = if (nextFEpisodes.isNotEmpty()) {
+                nextFEpisodes
+            } else {
+                doc.select("a[href*='/season/'][href*='/episode/']").mapNotNull { a ->
+                    val epHref = a.attr("href").ifBlank { return@mapNotNull null }
+                    val epUrl = fixUrlNull(epHref) ?: return@mapNotNull null
+                    val epText = a.text().trim()
 
-                val sNum = sMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
-                val eNum = eMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    val sMatch = Regex("""/season/(\d+)""", RegexOption.IGNORE_CASE).find(epHref)
+                        ?: Regex("""S(\d+)""", RegexOption.IGNORE_CASE).find(epText)
+                    val eMatch = Regex("""/episode/(\d+)""", RegexOption.IGNORE_CASE).find(epHref)
+                        ?: Regex("""E(\d+)""", RegexOption.IGNORE_CASE).find(epText)
 
-                val titleMatch = Regex("""\b\d+m\s*(.+)$""").find(epText)?.groupValues?.getOrNull(1)?.trim()
-                val epName = titleMatch?.ifBlank { null }
-                    ?: (if (eNum != null) "Episode $eNum" else epText.ifBlank { "Episode" })
+                    val sNum = sMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+                    val eNum = eMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
 
-                newEpisode(epUrl) {
-                    this.name = epName
-                    this.season = sNum
-                    this.episode = eNum
+                    val titleMatch = Regex("""\b\d+m\s*(.+)$""").find(epText)?.groupValues?.getOrNull(1)?.trim()
+                    val epName = titleMatch?.ifBlank { null }
+                        ?: (if (eNum != null) "Episode $eNum" else epText.ifBlank { "Episode" })
+
+                    newEpisode(epUrl) {
+                        this.name = epName
+                        this.season = sNum
+                        this.episode = eNum
+                    }
                 }
             }
 
@@ -173,18 +188,105 @@ class PusatFilm : MainAPI() {
 
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, finalEpisodes) {
                 this.posterUrl = poster?.let { fixUrlNull(it) }
+                this.backgroundPosterUrl = backdrop?.let { fixUrlNull(it) }
                 this.plot = plot
                 this.year = year
                 this.tags = tags
+                this.score = score
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster?.let { fixUrlNull(it) }
+                this.backgroundPosterUrl = backdrop?.let { fixUrlNull(it) }
                 this.plot = plot
                 this.year = year
                 this.tags = tags
+                this.score = score
             }
         }
+    }
+
+    private fun extractSeasonsFromHtml(html: String, seriesSlug: String): List<Episode> {
+        val pushRegex = Regex("""self\.__next_f\.push\(\[1,"([\s\S]*?)"\]\)""")
+        for (match in pushRegex.findAll(html)) {
+            val rawChunk = match.groupValues[1]
+            if (rawChunk.contains("seasons") && rawChunk.contains("seriesSlug")) {
+                val unescaped = rawChunk.replace("\\\"", "\"").replace("\\\\", "\\")
+                val seasonsIdx = unescaped.indexOf("\"seasons\":[")
+                if (seasonsIdx == -1) continue
+
+                val start = seasonsIdx + "\"seasons\":".length
+                var depth = 0
+                var inString = false
+                var escape = false
+                var end = -1
+
+                for (i in start until unescaped.length) {
+                    val c = unescaped[i]
+                    if (escape) {
+                        escape = false
+                        continue
+                    }
+                    if (c == '\\') {
+                        escape = true
+                        continue
+                    }
+                    if (c == '"') {
+                        inString = !inString
+                        continue
+                    }
+                    if (!inString) {
+                        if (c == '[') depth++
+                        else if (c == ']') {
+                            depth--
+                            if (depth == 0) {
+                                end = i + 1
+                                break
+                            }
+                        }
+                    }
+                }
+
+                if (end != -1) {
+                    try {
+                        val seasonsJson = unescaped.substring(start, end)
+                        val seasonsArray = JSONArray(seasonsJson)
+                        val episodeList = mutableListOf<Episode>()
+
+                        for (sIdx in 0 until seasonsArray.length()) {
+                            val seasonObj = seasonsArray.optJSONObject(sIdx) ?: continue
+                            val sNum = seasonObj.optInt("number", sIdx + 1)
+                            val episodesArray = seasonObj.optJSONArray("episodes") ?: continue
+
+                            for (eIdx in 0 until episodesArray.length()) {
+                                val epObj = episodesArray.optJSONObject(eIdx) ?: continue
+                                val eNum = epObj.optInt("number", eIdx + 1)
+                                val epName = epObj.optString("name", "").ifBlank { "Episode $eNum" }
+                                val epOverview = epObj.optString("overview", "").ifBlank { null }
+                                val stillPath = epObj.optString("stillPath", "")
+                                val stillUrl = if (stillPath.isNotBlank()) "https://image.tmdb.org/t/p/w500$stillPath" else null
+                                val embedUrl = epObj.optString("embedUrl", "")
+
+                                val baseEpUrl = fixUrl("/series/$seriesSlug/season/$sNum/episode/$eNum")
+                                val data = if (embedUrl.isNotBlank()) "$baseEpUrl#embedUrl=$embedUrl" else baseEpUrl
+
+                                episodeList.add(newEpisode(data) {
+                                    this.name = epName
+                                    this.season = sNum
+                                    this.episode = eNum
+                                    this.posterUrl = stillUrl
+                                    this.description = epOverview
+                                })
+                            }
+                        }
+                        if (episodeList.isNotEmpty()) {
+                            return episodeList
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+        return emptyList()
     }
 
     override suspend fun loadLinks(
@@ -193,8 +295,20 @@ class PusatFilm : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val pageText = app.get(data, headers = headers).text
+        val embedFromData = Regex("""#embedUrl=(https?://[^\s&]+)""").find(data)?.groupValues?.getOrNull(1)
+        val directShare = embedFromData?.let { Regex("""kotakajaib\.me/(?:embed|file)/([a-zA-Z0-9_-]+)""").find(it)?.groupValues?.getOrNull(1) }
+        val refererUrl = data.substringBefore("#")
 
+        var foundAny = false
+        if (!directShare.isNullOrBlank()) {
+            extractKotakAjaib(directShare, refererUrl, subtitleCallback) { link ->
+                foundAny = true
+                callback(link)
+            }
+            if (foundAny) return true
+        }
+
+        val pageText = app.get(refererUrl, headers = headers).text
         val unescaped = pageText.replace("\\\"", "\"").replace("\\/", "/")
 
         val activeShare = Regex("""["']embedUrl["']:\s*["']https?://kotakajaib\.me/(?:embed|file)/([a-zA-Z0-9_-]+)""").find(unescaped)?.groupValues?.getOrNull(1)
@@ -210,7 +324,7 @@ class PusatFilm : MainAPI() {
         }
 
         for (share in shares) {
-            extractKotakAjaib(share, data, subtitleCallback, callback)
+            extractKotakAjaib(share, refererUrl, subtitleCallback, callback)
         }
 
         return true
@@ -235,6 +349,7 @@ class PusatFilm : MainAPI() {
             val kp = embedDoc.selectFirst("#kp") ?: return
             val token = kp.attr("data-token").ifBlank { null } ?: return
             val providers = kp.select("button[data-p]").map { it.attr("data-p") }.filter { it.isNotBlank() }
+                .distinct()
                 .ifEmpty { listOf("hydrax", "gdriveplayer") }
 
             for (provider in providers) {
