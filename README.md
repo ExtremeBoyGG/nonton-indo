@@ -61,7 +61,7 @@
 |---|---|---|
 | <img src="https://www.google.com/s2/favicons?domain=blurayufr.site&sz=16" width="16" height="16"> BlurayUFR | blurayufr.site | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=gfymultimedx.online&sz=16" width="16" height="16"> GfyMultimedx | gfymultimedx.online | ⚠️ Butuh Akun OTP |
-| <img src="https://www.google.com/s2/favicons?domain=sweetiepieparenting.com&sz=16" width="16" height="16"> Idlix | sweetiepieparenting.com | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=z2.idlixku.com&sz=16" width="16" height="16"> Idlix | z2.idlixku.com | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=server-1.layar.asia&sz=16" width="16" height="16"> LayarAsia | server-1.layar.asia | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=tv9.nontondrama.my&sz=16" width="16" height="16"> LK21 | tv9.nontondrama.my | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=themoviebox.org&sz=16" width="16" height="16"> MovieBox | themoviebox.org | ✅ Stable |
