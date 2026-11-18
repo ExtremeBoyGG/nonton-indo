@@ -3,6 +3,7 @@ package com.indo
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
@@ -12,7 +13,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 class Idlix : MainAPI() {
-    override var mainUrl = "https://z2.idlixku.com"
+    override var mainUrl = "https://z3.idlixku.com"
     override var name = "Idlix"
     override val hasMainPage = true
     override var lang = "id"
@@ -285,6 +286,7 @@ class Idlix : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (tryLoadFromApi(data, subtitleCallback, callback)) return true
+        if (tryLoadFromWebView(data, callback)) return true
 
         val resp = app.get(data, interceptor = cfKiller)
         val raw = resp.text
@@ -422,6 +424,8 @@ class Idlix : MainAPI() {
             val playInfo = JSONObject(playInfoResp.text)
             val gateToken = playInfo.optString("gateToken", "")
             if (gateToken.isBlank()) return false
+            // A Turnstile-gated claim always fails here; let the WebView path handle it right away.
+            if (playInfo.has("verification")) return false
 
             val kind = playInfo.optString("kind", "")
             if (kind == "gate") {
@@ -535,6 +539,31 @@ class Idlix : MainAPI() {
         }
 
         return false
+    }
+
+    /**
+     * Guest playback now needs a Cloudflare Turnstile token on the session claim, which only the
+     * site's own player can obtain. Load the real page in a WebView, start the player, wait out the
+     * preroll, and capture the master playlist it requests. The master is served as
+     * `majorplay.net/v/<zone>/<videoId>/config-<n>.json?t=...&pm=browser` (HLS despite the .json name);
+     * its token must be carried to every variant, init map and segment, which processHlsStream does.
+     */
+    private suspend fun tryLoadFromWebView(data: String, callback: (ExtractorLink) -> Unit): Boolean {
+        // Stored links may still point at an older mirror domain.
+        val pageUrl = data.substringBefore("#").replace(Regex("""^https?://[^/]+"""), mainUrl)
+        return try {
+            val resolver = WebViewResolver(
+                interceptUrl = Regex("""majorplay\.net/v/[^?#]+/config-[^/?#]+\.json|\.m3u8"""),
+                script = PLAYER_AUTOSTART_JS,
+                timeout = 90_000L
+            )
+            val (request, extra) = resolver.resolveUsingWebView(pageUrl, "$mainUrl/")
+            val streamUrl = (request ?: extra.firstOrNull())?.url?.toString() ?: return false
+            processHlsStream(streamUrl, 720, callback)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private suspend fun postClaim(gateToken: String, pageUrl: String): JSONObject {
@@ -756,5 +785,23 @@ class Idlix : MainAPI() {
     private fun fixUrl(url: String): String {
         if (url.startsWith("http")) return url
         return "$mainUrl$url"
+    }
+
+    companion object {
+        // Presses the hero play button, then the preroll "Skip" button once its countdown ends.
+        private const val PLAYER_AUTOSTART_JS = """
+            (function () {
+                if (window.__csIdlixAuto) return;
+                window.__csIdlixAuto = true;
+                setInterval(function () {
+                    var play = document.querySelector('button.group.cursor-pointer.z-10');
+                    if (play) play.click();
+                    document.querySelectorAll('button').forEach(function (b) {
+                        var t = (b.innerText || '').trim();
+                        if (!b.disabled && /^(skip|lewati)/i.test(t) && !/\d+\s*s$/i.test(t)) b.click();
+                    });
+                }, 1000);
+            })();
+        """
     }
 }

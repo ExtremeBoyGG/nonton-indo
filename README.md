@@ -46,16 +46,16 @@
 |---|---|---|
 | <img src="https://www.google.com/s2/favicons?domain=anime-indo.lol&sz=16" width="16" height="16"> AnimeIndo | anime-indo.lol | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=anichin.moe&sz=16" width="16" height="16"> Anichin | anichin.moe | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=ca3d.site&sz=16" width="16" height="16"> CA3D | ca3d.site | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=donghive.vip&sz=16" width="16" height="16"> Donghub | donghive.vip | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=v20.kuramanime.ing&sz=16" width="16" height="16"> Kuramanime | v20.kuramanime.ing | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=nimegami.id&sz=16" width="16" height="16"> Nimegami | nimegami.id | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=otakudesu.blog&sz=16" width="16" height="16"> Otakudesu | otakudesu.blog | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=x6.sokuja.uk&sz=16" width="16" height="16"> Sokuja | x6.sokuja.uk | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=yunshanid.site&sz=16" width="16" height="16"> YunshanID | yunshanid.site | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=animasuid.com&sz=16" width="16" height="16"> Animasu | animasuid.com | ⚠️ Development |
-| <img src="https://www.google.com/s2/favicons?domain=ca3d.site&sz=16" width="16" height="16"> CA3D | ca3d.site | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=kuronime.sbs&sz=16" width="16" height="16"> Kuronime | kuronime.sbs | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=oploverz.ch&sz=16" width="16" height="16"> Oploverz | oploverz.ch | ⚠️ Development |
-| <img src="https://www.google.com/s2/favicons?domain=yunshanid.site&sz=16" width="16" height="16"> YunshanID | yunshanid.site | ⚠️ Development |
 
 ### Film & Series
 
@@ -63,7 +63,7 @@
 |---|---|---|
 | <img src="https://www.google.com/s2/favicons?domain=blurayufr.site&sz=16" width="16" height="16"> BlurayUFR | blurayufr.site | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=gfymultimedx.online&sz=16" width="16" height="16"> GfyMultimedx | gfymultimedx.online | ⚠️ Butuh Akun OTP |
-| <img src="https://www.google.com/s2/favicons?domain=z2.idlixku.com&sz=16" width="16" height="16"> Idlix | z2.idlixku.com | ✅ Stable |
+| <img src="https://www.google.com/s2/favicons?domain=z3.idlixku.com&sz=16" width="16" height="16"> Idlix | z3.idlixku.com | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=server-1.layar.asia&sz=16" width="16" height="16"> LayarAsia | server-1.layar.asia | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=tv9.nontondrama.my&sz=16" width="16" height="16"> LK21 | tv9.nontondrama.my | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=themoviebox.org&sz=16" width="16" height="16"> MovieBox | themoviebox.org | ✅ Stable |
