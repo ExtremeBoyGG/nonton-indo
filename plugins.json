@@ -251,5 +251,33 @@
         "internalName": "Kuronime",
         "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/Kuronime.cs3",
         "name": "Kuronime"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://yunshanid.site&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Anime", "AnimeMovie"],
+        "version": 1,
+        "internalName": "YunshanID",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/YunshanID.cs3",
+        "name": "YunshanID"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://ca3d.site&sz=%size%",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ExtremeBoyGG/nonton-indo",
+        "fileSize": 0,
+        "status": 1,
+        "language": "id",
+        "authors": ["ExtremeBoy"],
+        "tvTypes": ["Anime", "AnimeMovie"],
+        "version": 1,
+        "internalName": "CA3D",
+        "url": "https://github.com/ExtremeBoyGG/nonton-indo/raw/main/build/CA3D.cs3",
+        "name": "CA3D"
     }
 ]

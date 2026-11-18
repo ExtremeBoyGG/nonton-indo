@@ -52,8 +52,10 @@
 | <img src="https://www.google.com/s2/favicons?domain=otakudesu.blog&sz=16" width="16" height="16"> Otakudesu | otakudesu.blog | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=x6.sokuja.uk&sz=16" width="16" height="16"> Sokuja | x6.sokuja.uk | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=animasuid.com&sz=16" width="16" height="16"> Animasu | animasuid.com | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=ca3d.site&sz=16" width="16" height="16"> CA3D | ca3d.site | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=kuronime.sbs&sz=16" width="16" height="16"> Kuronime | kuronime.sbs | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=oploverz.ch&sz=16" width="16" height="16"> Oploverz | oploverz.ch | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=yunshanid.site&sz=16" width="16" height="16"> YunshanID | yunshanid.site | ⚠️ Development |
 
 ### Film & Series
 
