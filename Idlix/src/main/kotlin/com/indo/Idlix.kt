@@ -15,6 +15,8 @@ import com.lagradost.nicehttp.JsonAsString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -38,17 +40,53 @@ class Idlix : MainAPI() {
 
     private val cfKiller = CloudflareKiller()
 
-    private val apiHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-        "Accept" to "application/json",
-        "Referer" to "$mainUrl/"
-    )
+    // A getter, so the Referer follows mainUrl when the domain moves.
+    private val apiHeaders
+        get() = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Accept" to "application/json",
+            "Referer" to "$mainUrl/"
+        )
 
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Home"
     )
 
+    private var mainUrlCheckedAt = 0L
+    private val mainUrlLock = Mutex()
+
+    /**
+     * The site keeps moving between mirror domains (z2.idlixku.com, z3.idlixku.com, ...).
+     * idlixian.com stays put and answers with a 301 to the current domain, so read its Location
+     * (without following it) and switch mainUrl to that host. Checked at most once per
+     * MAIN_URL_CHECK_MS; when the backup cannot be reached, the last known domain stays.
+     * Stored links from an older domain keep working: load and loadLinks only use their slug.
+     */
+    private suspend fun ensureMainUrl() {
+        if (System.currentTimeMillis() - mainUrlCheckedAt < MAIN_URL_CHECK_MS) return
+        mainUrlLock.withLock {
+            if (System.currentTimeMillis() - mainUrlCheckedAt < MAIN_URL_CHECK_MS) return
+            mainUrlCheckedAt = System.currentTimeMillis()
+            val location = runCatching {
+                app.get(BACKUP_URL, allowRedirects = false, timeout = 5L).okhttpResponse.header("Location")
+            }.onFailure { Log.d(TAG, "backup domain check failed: $it") }.getOrNull()
+            val target = location?.toHttpUrlOrNull()
+            if (target == null || target.host == BACKUP_HOST || target.host.endsWith(".$BACKUP_HOST")) {
+                Log.d(TAG, "backup domain gave no redirect, keeping $mainUrl")
+                return
+            }
+            val newMainUrl = "${target.scheme}://${target.host}"
+            if (newMainUrl != mainUrl) {
+                Log.d(TAG, "main domain moved: $mainUrl -> $newMainUrl")
+                mainUrl = newMainUrl
+            } else {
+                Log.d(TAG, "main domain still $mainUrl")
+            }
+        }
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        ensureMainUrl()
         val sections = listOfNotNull(
             getApiSection("Movies", page, "api/movies"),
             getApiSection("TV Series", page, "api/series"),
@@ -90,6 +128,7 @@ class Idlix : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        ensureMainUrl()
         val q = URLEncoder.encode(query, "UTF-8")
         val resp = app.get("$mainUrl/api/search?q=$q", headers = apiHeaders, interceptor = cfKiller)
         val text = resp.text
@@ -123,6 +162,7 @@ class Idlix : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
+        ensureMainUrl()
         val isSeries = url.contains("/series/")
         val slug = if (isSeries) {
             url.substringAfter("/series/").substringBefore("/").substringBefore("?")
@@ -248,7 +288,7 @@ class Idlix : MainAPI() {
         }
 
         // HTML fallback
-        val resp = app.get(url, interceptor = cfKiller)
+        val resp = app.get(onMainDomain(url), interceptor = cfKiller)
         val raw = resp.text
         val html = raw.replace("\\\"", "\"")
 
@@ -302,11 +342,12 @@ class Idlix : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        ensureMainUrl()
         if (tryLoadFromApi(data, subtitleCallback, callback)) return true
         if (tryLoadFromWebView(data, subtitleCallback, callback)) return true
 
         var found = false
-        val resp = app.get(data, interceptor = cfKiller)
+        val resp = app.get(onMainDomain(data.substringBefore("#")), interceptor = cfKiller)
         val raw = resp.text
         val html = raw.replace("\\\"", "\"")
 
@@ -585,8 +626,7 @@ class Idlix : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Stored links may still point at an older mirror domain.
-        val pageUrl = data.substringBefore("#").replace(Regex("""^https?://[^/]+"""), mainUrl)
+        val pageUrl = onMainDomain(data.substringBefore("#"))
         var lastStatus = ""
         val sessionData = AtomicReference<JSONObject?>(null)
         return try {
@@ -887,6 +927,9 @@ class Idlix : MainAPI() {
         }
     }
 
+    // Stored links may still point at an older mirror domain.
+    private fun onMainDomain(url: String) = url.replace(Regex("""^https?://[^/]+"""), mainUrl)
+
     private fun fixUrl(url: String): String {
         if (url.startsWith("http")) return url
         return "$mainUrl$url"
@@ -894,6 +937,11 @@ class Idlix : MainAPI() {
 
     companion object {
         private const val TAG = "Idlix"
+
+        // Stable address that redirects (301) to the current mirror domain.
+        private const val BACKUP_HOST = "idlixian.com"
+        private const val BACKUP_URL = "https://$BACKUP_HOST/"
+        private const val MAIN_URL_CHECK_MS = 30 * 60 * 1000L
 
         // Lets the hidden WebView be inspected over adb (chrome://inspect) while testing.
         private const val DEBUG_WEBVIEW = false
