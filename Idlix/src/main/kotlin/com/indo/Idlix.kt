@@ -1,5 +1,8 @@
 package com.indo
 
+import android.util.Log
+import android.webkit.CookieManager
+import android.webkit.WebView
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.network.CloudflareKiller
@@ -9,8 +12,21 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.JsonAsString
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
+import okhttp3.Request
+import okhttp3.Response
+import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 class Idlix : MainAPI() {
     override var mainUrl = "https://z3.idlixku.com"
@@ -74,7 +90,8 @@ class Idlix : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val resp = app.get("$mainUrl/api/search?q=$query", headers = apiHeaders, interceptor = cfKiller)
+        val q = URLEncoder.encode(query, "UTF-8")
+        val resp = app.get("$mainUrl/api/search?q=$q", headers = apiHeaders, interceptor = cfKiller)
         val text = resp.text
         val data = try { JSONObject(text).optJSONArray("results") } catch (e: Exception) { return emptyList() }
         if (data == null) return emptyList()
@@ -286,8 +303,9 @@ class Idlix : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (tryLoadFromApi(data, subtitleCallback, callback)) return true
-        if (tryLoadFromWebView(data, callback)) return true
+        if (tryLoadFromWebView(data, subtitleCallback, callback)) return true
 
+        var found = false
         val resp = app.get(data, interceptor = cfKiller)
         val raw = resp.text
         val html = raw.replace("\\\"", "\"")
@@ -305,6 +323,7 @@ class Idlix : MainAPI() {
                 callback(newExtractorLink("Idlix", "Idlix", m.value) {
                     this.referer = "$mainUrl/"
                 })
+                found = true
             }
             Regex("""playbackUrl":"([^"]+)""").findAll(content).forEach { m ->
                 val quality = Regex("""quality":"([^"]+)""").find(content)?.groupValues?.getOrNull(1) ?: "FHD"
@@ -312,10 +331,11 @@ class Idlix : MainAPI() {
                     this.quality = parseQuality(quality)
                     this.referer = "$mainUrl/"
                 })
+                found = true
             }
         }
 
-        return true
+        return found
     }
 
     private suspend fun tryLoadFromApi(
@@ -524,14 +544,16 @@ class Idlix : MainAPI() {
                         subtitleCallback(newSubtitleFile(lang, subUrl))
                     }
                     val maxHeight = claimJson.optInt("maxHeight", 720)
-                    processHlsStream(streamUrl, maxHeight, callback)
+                    registerSession(streamUrl, claimJson, apiHeaders["User-Agent"], null)
+                    emitStream(streamUrl, maxHeight, apiHeaders["User-Agent"], callback)
                     return true
                 }
             }
 
             if (initialMaster.isNotBlank()) {
                 val maxHeight = claimJson.optInt("maxHeight", 720)
-                processHlsStream(initialMaster, maxHeight, callback)
+                registerSession(initialMaster, claimJson, apiHeaders["User-Agent"], null)
+                emitStream(initialMaster, maxHeight, apiHeaders["User-Agent"], callback)
                 return true
             }
         } catch (_: Exception) {
@@ -546,23 +568,93 @@ class Idlix : MainAPI() {
      * site's own player can obtain. Load the real page in a WebView, start the player, wait out the
      * preroll, and capture the master playlist it requests. The master is served as
      * `majorplay.net/v/<zone>/<videoId>/config-<n>.json?t=...&pm=browser` (HLS despite the .json name);
-     * its token must be carried to every variant, init map and segment, which processHlsStream does.
+     * its token must be carried to every variant, init map and segment, which getVideoInterceptor does.
+     *
+     * The WebView must run as a plain browser: with useOkhttp the resolver replays the page's requests
+     * through OkHttp, which drops POST bodies (claim, redeem) and Set-Cookie (the `did` cookie set by
+     * play-info), and a spoofed desktop user agent makes Turnstile fall back to an interactive check
+     * that nobody can click in a hidden WebView.
+     *
+     * The injected script also copies the claim and redeem responses (claim, renewal token, master
+     * URL, subtitles) into a request the resolver answers locally; that gives the subtitles and what
+     * getVideoInterceptor needs to get a new stream token once the first one (1 hour) runs out.
+     * The master request itself stays as a fallback.
      */
-    private suspend fun tryLoadFromWebView(data: String, callback: (ExtractorLink) -> Unit): Boolean {
+    private suspend fun tryLoadFromWebView(
+        data: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         // Stored links may still point at an older mirror domain.
         val pageUrl = data.substringBefore("#").replace(Regex("""^https?://[^/]+"""), mainUrl)
+        var lastStatus = ""
+        val sessionData = AtomicReference<JSONObject?>(null)
         return try {
+            if (DEBUG_WEBVIEW) withContext(Dispatchers.Main) { WebView.setWebContentsDebuggingEnabled(true) }
             val resolver = WebViewResolver(
-                interceptUrl = Regex("""majorplay\.net/v/[^?#]+/config-[^/?#]+\.json|\.m3u8"""),
+                interceptUrl = MASTER_URL_REGEX,
+                additionalUrls = listOf(TRACE_URL_REGEX, SESSION_URL_REGEX),
+                userAgent = null,
+                useOkhttp = false,
                 script = PLAYER_AUTOSTART_JS,
+                scriptCallback = { status ->
+                    if (status != lastStatus) {
+                        lastStatus = status
+                        Log.d(TAG, "player state: $status")
+                    }
+                },
                 timeout = 90_000L
             )
-            val (request, extra) = resolver.resolveUsingWebView(pageUrl, "$mainUrl/")
-            val streamUrl = (request ?: extra.firstOrNull())?.url?.toString() ?: return false
-            processHlsStream(streamUrl, 720, callback)
+            Log.d(TAG, "webview start: $pageUrl")
+            val (request, _) = resolver.resolveUsingWebView(
+                url = pageUrl,
+                referer = "$mainUrl/",
+                headers = emptyMap(),
+                method = "GET"
+            ) { req ->
+                if (req.url.encodedPath == SESSION_PATH) {
+                    val json = req.url.queryParameter("d")?.let { runCatching { JSONObject(it) }.getOrNull() }
+                    Log.d(TAG, "webview session: ${json?.keys()?.asSequence()?.toList()}")
+                    if (json != null) sessionData.set(json)
+                    json?.optString("url").isNullOrBlank().not()
+                } else {
+                    Log.d(TAG, "webview request: ${req.method} ${req.url.host}${req.url.encodedPath}")
+                    false
+                }
+            }
+            val session = sessionData.get()
+            val streamUrl = session?.optString("url")?.ifBlank { null } ?: request?.url?.toString()
+            if (streamUrl == null) {
+                Log.d(TAG, "webview gave no stream, last player state: $lastStatus")
+                return false
+            }
+            val userAgent = request?.header("User-Agent") ?: WebViewResolver.webViewUserAgent
+            val cookie = runCatching { CookieManager.getInstance().getCookie(mainUrl) }.getOrNull()
+            registerSession(streamUrl, session, userAgent, cookie)
+            session?.optJSONArray("subtitles")?.let { emitSubtitles(it, userAgent, subtitleCallback) }
+            emitStream(streamUrl, 720, userAgent, callback)
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "webview failed: $e")
             false
+        }
+    }
+
+    private suspend fun emitSubtitles(
+        subs: JSONArray,
+        userAgent: String?,
+        subtitleCallback: (SubtitleFile) -> Unit
+    ) {
+        val subHeaders = mutableMapOf("Origin" to mainUrl, "Referer" to "$mainUrl/")
+        if (!userAgent.isNullOrBlank()) subHeaders["User-Agent"] = userAgent
+        for (i in 0 until subs.length()) {
+            val sub = subs.optJSONObject(i) ?: continue
+            val label = sub.optString("label").ifBlank { sub.optString("lang") }
+            val path = sub.optString("path")
+            if (label.isBlank() || path.isBlank()) continue
+            subtitleCallback(newSubtitleFile(label, if (path.startsWith("http")) path else fixUrl(path)) {
+                this.headers = subHeaders
+            })
         }
     }
 
@@ -580,197 +672,210 @@ class Idlix : MainAPI() {
         return JSONObject(claimResp.text)
     }
 
-    private suspend fun processHlsStream(
+    private suspend fun emitStream(
         streamUrl: String,
         maxHeight: Int,
+        userAgent: String?,
         callback: (ExtractorLink) -> Unit
     ) {
-        val streamHeaders = mapOf(
-            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-            "Origin" to mainUrl,
-            "Referer" to "$mainUrl/"
-        )
-        val tokenQuery = streamUrl.substringAfter("?", "")
-        val streamBaseUri = try { java.net.URI.create(streamUrl) } catch (_: Exception) { null }
-
-        try {
-            val masterText = app.get(streamUrl, headers = streamHeaders).text
-
-            if (masterText.contains("#EXT-X-STREAM-INF")) {
-                val lines = masterText.lines().toMutableList()
-                var currentRes: String? = null
-                val audioDataUris = mutableMapOf<String, String>()
-
-                // 1. Process and rewrite audio tracks if present
-                for (i in lines.indices) {
-                    val line = lines[i].trim()
-                    if (line.startsWith("#EXT-X-MEDIA:") && line.contains("TYPE=AUDIO")) {
-                        val uriMatch = Regex("""URI="([^"]+)"""").find(line)
-                        if (uriMatch != null) {
-                            val rawAudioUri = uriMatch.groupValues[1]
-                            val fullAudioUrl = appendToken(
-                                streamBaseUri?.resolve(rawAudioUri)?.toString() ?: rawAudioUri,
-                                tokenQuery
-                            )
-                            val audioDataUri = audioDataUris.getOrPut(rawAudioUri) {
-                                try {
-                                    val aText = app.get(fullAudioUrl, headers = streamHeaders).text
-                                    val rewrittenA = rewriteMediaPlaylist(aText, fullAudioUrl, tokenQuery)
-                                    val b64 = android.util.Base64.encodeToString(
-                                        rewrittenA.toByteArray(Charsets.UTF_8),
-                                        android.util.Base64.NO_WRAP
-                                    )
-                                    "data:application/vnd.apple.mpegurl;base64,$b64"
-                                } catch (_: Exception) {
-                                    fullAudioUrl
-                                }
-                            }
-                            lines[i] = line.replace("""URI="$rawAudioUri"""", """URI="$audioDataUri"""")
-                        }
-                    }
-                }
-
-                // 2. Process and rewrite video variant streams
-                for (i in lines.indices) {
-                    val line = lines[i].trim()
-                    if (line.startsWith("#EXT-X-STREAM-INF")) {
-                        val resMatch = Regex("""RESOLUTION=(\d+)x(\d+)""").find(line)
-                        currentRes = resMatch?.groupValues?.getOrNull(2)
-                    } else if (!line.startsWith("#") && line.isNotBlank()) {
-                        val rawVideoUri = line
-                        val fullVideoUrl = appendToken(
-                            streamBaseUri?.resolve(rawVideoUri)?.toString() ?: rawVideoUri,
-                            tokenQuery
-                        )
-                        try {
-                            val vText = app.get(fullVideoUrl, headers = streamHeaders).text
-                            if (vText.contains("#EXTINF")) {
-                                val rewrittenV = rewriteMediaPlaylist(vText, fullVideoUrl, tokenQuery)
-                                val b64 = android.util.Base64.encodeToString(
-                                    rewrittenV.toByteArray(Charsets.UTF_8),
-                                    android.util.Base64.NO_WRAP
-                                )
-                                val videoDataUri = "data:application/vnd.apple.mpegurl;base64,$b64"
-
-                                // Replace raw video uri with rewritten data URI in master playlist
-                                lines[i] = videoDataUri
-
-                                val qNum = currentRes?.toIntOrNull() ?: maxHeight
-                                val qName = "Idlix - ${qNum}p"
-                                val qVal = when {
-                                    qNum >= 1080 -> Qualities.P1080.value
-                                    qNum >= 720 -> Qualities.P720.value
-                                    qNum >= 480 -> Qualities.P480.value
-                                    qNum >= 360 -> Qualities.P360.value
-                                    else -> Qualities.Unknown.value
-                                }
-
-                                callback(newExtractorLink("Idlix", qName, videoDataUri, type = ExtractorLinkType.M3U8) {
-                                    this.quality = qVal
-                                    this.referer = "$mainUrl/"
-                                    this.headers = mapOf(
-                                        "Origin" to mainUrl,
-                                        "Referer" to "$mainUrl/"
-                                    )
-                                })
-                            }
-                        } catch (_: Exception) {}
-                        currentRes = null
-                    }
-                }
-
-                // 3. Emit master playlist (contains full video + audio tracks)
-                try {
-                    val rewrittenMaster = lines.joinToString("\n")
-                    val masterB64 = android.util.Base64.encodeToString(
-                        rewrittenMaster.toByteArray(Charsets.UTF_8),
-                        android.util.Base64.NO_WRAP
-                    )
-                    val masterDataUri = "data:application/vnd.apple.mpegurl;base64,$masterB64"
-                    callback(newExtractorLink("Idlix", "Idlix - Auto (Full Audio/Video)", masterDataUri, type = ExtractorLinkType.M3U8) {
-                        this.quality = if (maxHeight >= 1080) Qualities.P1080.value else Qualities.P720.value
-                        this.referer = "$mainUrl/"
-                        this.headers = mapOf(
-                            "Origin" to mainUrl,
-                            "Referer" to "$mainUrl/"
-                        )
-                    })
-                } catch (_: Exception) {}
-
-            } else if (masterText.contains("#EXTINF")) {
-                val rewritten = rewriteMediaPlaylist(masterText, streamUrl, tokenQuery)
-                val b64 = android.util.Base64.encodeToString(
-                    rewritten.toByteArray(Charsets.UTF_8),
-                    android.util.Base64.NO_WRAP
-                )
-                val dataUri = "data:application/vnd.apple.mpegurl;base64,$b64"
-                val qualityName = if (maxHeight > 0) "Idlix - ${maxHeight}p" else "Idlix"
-                val qVal = when {
-                    maxHeight >= 1080 -> Qualities.P1080.value
-                    maxHeight >= 720 -> Qualities.P720.value
-                    maxHeight >= 480 -> Qualities.P480.value
-                    maxHeight >= 360 -> Qualities.P360.value
-                    else -> Qualities.Unknown.value
-                }
-                callback(newExtractorLink("Idlix", qualityName, dataUri, type = ExtractorLinkType.M3U8) {
-                    this.quality = qVal
-                    this.referer = "$mainUrl/"
-                    this.headers = mapOf(
-                        "Origin" to mainUrl,
-                        "Referer" to "$mainUrl/"
-                    )
-                })
-            }
-        } catch (_: Exception) {}
-
-        // 4. Always emit direct stream URL as fallback
-        val fallbackQuality = if (maxHeight > 0) "Idlix (Direct) - ${maxHeight}p" else "Idlix (Direct)"
-        callback(newExtractorLink("Idlix", fallbackQuality, streamUrl, type = ExtractorLinkType.M3U8) {
+        val linkHeaders = mutableMapOf("Origin" to mainUrl, "Referer" to "$mainUrl/")
+        if (!userAgent.isNullOrBlank()) linkHeaders["User-Agent"] = userAgent
+        val linkName = if (maxHeight > 0) "Idlix ${maxHeight}p" else "Idlix"
+        val linkQuality = when {
+            maxHeight >= 1080 -> Qualities.P1080.value
+            maxHeight >= 720 -> Qualities.P720.value
+            maxHeight >= 480 -> Qualities.P480.value
+            maxHeight >= 360 -> Qualities.P360.value
+            else -> Qualities.Unknown.value
+        }
+        callback(newExtractorLink("Idlix", linkName, streamUrl, type = ExtractorLinkType.M3U8) {
+            this.quality = linkQuality
             this.referer = "$mainUrl/"
-            this.headers = mapOf(
-                "Origin" to mainUrl,
-                "Referer" to "$mainUrl/"
-            )
+            this.headers = linkHeaders
         })
     }
 
-    private fun appendToken(url: String, tokenQuery: String): String {
-        if (tokenQuery.isBlank() || url.contains("t=")) return url
-        val sep = if (url.contains("?")) "&" else "?"
-        return "$url$sep$tokenQuery"
-    }
+    /**
+     * One playback: the master's token and what is needed to get a new one. The stream token runs
+     * out an hour after redeem, the claim it came from lasts 12 hours, and the site gets a new
+     * master URL by redeeming the same claim again (or, once the claim is gone, renewing it with
+     * the renewal token). Neither needs another Turnstile check.
+     */
+    private class StreamSession(
+        masterUrl: HttpUrl,
+        var claim: String?,
+        var redeemUrl: String?,
+        var renewalToken: String?,
+        var progressToken: String?,
+        val userAgent: String?,
+        val cookie: String?
+    ) {
+        val pathPrefix: String = masterUrl.encodedPath.substringBeforeLast("/") + "/"
+        @Volatile var query: String = masterUrl.encodedQuery.orEmpty()
+        var lastRefreshAt = 0L
 
-    private fun rewriteMediaPlaylist(playlistText: String, subUrl: String, tokenQuery: String): String {
-        val baseUri = try { java.net.URI.create(subUrl) } catch (_: Exception) { null }
-        return playlistText.lines().joinToString("\n") { line ->
-            val trimmed = line.trim()
-            when {
-                trimmed.startsWith("#EXT-X-MAP:") -> {
-                    val m = Regex("""URI="([^"]+)"""").find(trimmed)
-                    if (m != null) {
-                        val rawUri = m.groupValues[1]
-                        val fullUri = baseUri?.resolve(rawUri)?.toString() ?: rawUri
-                        val withToken = appendToken(fullUri, tokenQuery)
-                        line.replace("""URI="$rawUri"""", """URI="$withToken"""")
-                    } else line
-                }
-                trimmed.startsWith("#EXT-X-KEY:") -> {
-                    val m = Regex("""URI="([^"]+)"""").find(trimmed)
-                    if (m != null) {
-                        val rawUri = m.groupValues[1]
-                        val fullUri = baseUri?.resolve(rawUri)?.toString() ?: rawUri
-                        val withToken = appendToken(fullUri, tokenQuery)
-                        line.replace("""URI="$rawUri"""", """URI="$withToken"""")
-                    } else line
-                }
-                trimmed.startsWith("#") || trimmed.isBlank() -> line
-                else -> {
-                    val fullUri = baseUri?.resolve(trimmed)?.toString() ?: trimmed
-                    appendToken(fullUri, tokenQuery)
+        // Only for testing the refresh: makes the first token look like it runs out early.
+        @Volatile var forcedExpiry: Long =
+            if (FORCE_REFRESH_AFTER_SEC > 0) System.currentTimeMillis() / 1000 + FORCE_REFRESH_AFTER_SEC
+            else Long.MAX_VALUE
+
+        val canRefresh get() = claim != null || renewalToken != null
+
+        /** Expiry in epoch seconds, read from `t=c2_3/v/<zone>/<videoId>/.<expiry>-<sig>`. */
+        val expiresAt: Long
+            get() {
+                val t = runCatching { URLDecoder.decode(query, "UTF-8") }.getOrDefault(query)
+                val fromToken = Regex("""/\.(\d{9,11})-""").find(t)?.groupValues?.get(1)?.toLongOrNull()
+                    ?: Long.MAX_VALUE
+                return minOf(fromToken, forcedExpiry)
+            }
+
+        fun covers(url: HttpUrl) = url.encodedPath.startsWith(pathPrefix) && url.queryParameter("t") == null
+
+        fun sign(request: Request, withQuery: String): Request {
+            val url = request.url
+            val builder = url.newBuilder()
+            withQuery.split("&").forEach { pair ->
+                val key = pair.substringBefore("=")
+                if (key.isNotBlank() && url.queryParameter(key) == null) {
+                    builder.addEncodedQueryParameter(key, pair.substringAfter("=", ""))
                 }
             }
+            return request.newBuilder().url(builder.build()).build()
         }
     }
+
+    private val sessions = ConcurrentHashMap<String, StreamSession>()
+
+    private fun registerSession(streamUrl: String, data: JSONObject?, userAgent: String?, cookie: String?) {
+        val master = streamUrl.toHttpUrlOrNull() ?: return
+        sessions[streamUrl] = StreamSession(
+            masterUrl = master,
+            claim = data?.optString("claim")?.ifBlank { null },
+            redeemUrl = data?.optString("redeemUrl")?.ifBlank { null },
+            renewalToken = data?.optString("renewalToken")?.ifBlank { null },
+            progressToken = data?.optString("progressToken")?.ifBlank { null },
+            userAgent = userAgent,
+            cookie = cookie
+        )
+    }
+
+    /**
+     * The stream token is only on the master playlist URL, and the CDN refuses every other request
+     * without it (401). Variant playlists are listed as paths without a query, and init maps and
+     * segments sit on many unrelated hosts (`g3.<random>.website/v/z3/<videoId>/p/.../cover.jpg`).
+     * The token is scoped to the path (`t=c2_3/v/z3/<videoId>/.<expiry>-<sig>`), so add the
+     * master's query parameters to every request under the master's directory, on any host, and
+     * get a new token when it is about to run out or the CDN refuses it.
+     */
+    override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
+        val session = sessions[extractorLink.url] ?: run {
+            val master = extractorLink.url.toHttpUrlOrNull() ?: return null
+            StreamSession(master, null, null, null, null, null, null)
+        }
+        if (session.query.isBlank()) return null
+        return Interceptor { chain -> interceptStream(chain, session) }
+    }
+
+    private fun interceptStream(chain: Interceptor.Chain, session: StreamSession): Response {
+        val request = chain.request()
+        if (!session.covers(request.url)) return chain.proceed(request)
+        if (session.canRefresh && session.expiresAt - nowSec() < TOKEN_REFRESH_MARGIN_SEC) {
+            refreshStreamToken(session, usedQuery = null)
+        }
+        val used = session.query
+        val response = chain.proceed(session.sign(request, used))
+        if (response.code != 401 && response.code != 403) return response
+        Log.d(TAG, "stream request refused (${response.code}): ${request.url.encodedPath}")
+        if (!session.canRefresh || !refreshStreamToken(session, usedQuery = used)) return response
+        response.close()
+        return chain.proceed(session.sign(request, session.query))
+    }
+
+    /**
+     * Gets a new master URL for [session] and takes its token. Requests run in parallel, so only one
+     * of them refreshes: [usedQuery] is the token a refused request carried (null for a refresh ahead
+     * of expiry); if the session already moved past it, there is nothing to do.
+     */
+    private fun refreshStreamToken(session: StreamSession, usedQuery: String?): Boolean = synchronized(session) {
+        if (usedQuery != null && session.query != usedQuery) return@synchronized true
+        if (usedQuery == null && session.expiresAt - nowSec() >= TOKEN_REFRESH_MARGIN_SEC) return@synchronized true
+        if (nowSec() - session.lastRefreshAt < 15) return@synchronized false
+        session.lastRefreshAt = nowSec()
+        val newUrl = runCatching { runBlocking { redeemStream(session) } }
+            .onFailure { Log.d(TAG, "token refresh failed: $it") }
+            .getOrNull()
+            ?.toHttpUrlOrNull()
+        if (newUrl == null) {
+            Log.d(TAG, "token refresh gave no stream URL")
+            return@synchronized false
+        }
+        val newPrefix = newUrl.encodedPath.substringBeforeLast("/") + "/"
+        if (newPrefix != session.pathPrefix) Log.d(TAG, "token refresh moved the stream to $newPrefix")
+        session.query = newUrl.encodedQuery.orEmpty()
+        session.forcedExpiry = Long.MAX_VALUE
+        Log.d(TAG, "stream token refreshed, expires at ${session.expiresAt}")
+        true
+    }
+
+    private suspend fun redeemStream(session: StreamSession): String? {
+        session.claim?.let { claim -> postRedeem(session, claim)?.let { return it } }
+        // The claim ran out (redeem answers 410): renew it, then redeem the new one.
+        val renewal = session.renewalToken ?: return null
+        val payload = JSONObject().put("renewalToken", renewal)
+        session.progressToken?.let { payload.put("progressToken", it) }
+        val resp = app.post(
+            "$mainUrl/api/watch/session/refresh-claim",
+            headers = sessionHeaders(session, withCookie = true),
+            json = JsonAsString(payload.toString())
+        )
+        val json = runCatching { JSONObject(resp.text) }.getOrNull()
+            ?.takeIf { it.optString("kind") == "pentos" && it.optString("claim").isNotBlank() }
+        if (json == null) {
+            Log.d(TAG, "claim renewal refused (${resp.code})")
+            return null
+        }
+        val claim = json.optString("claim")
+        session.claim = claim
+        json.optString("renewalToken").ifBlank { null }?.let { session.renewalToken = it }
+        json.optString("progressToken").ifBlank { null }?.let { session.progressToken = it }
+        json.optString("redeemUrl").ifBlank { null }?.let { session.redeemUrl = it }
+        return postRedeem(session, claim)
+    }
+
+    private suspend fun postRedeem(session: StreamSession, claim: String): String? {
+        val raw = session.redeemUrl.orEmpty()
+        val external = raw.startsWith("http")
+        val url = when {
+            external -> raw
+            raw.isNotBlank() -> mainUrl + (if (raw.startsWith("/api")) "" else "/api") + raw
+            else -> "$mainUrl/api/watch/session/redeem"
+        }
+        val resp = app.post(
+            url,
+            headers = sessionHeaders(session, withCookie = !external),
+            json = JsonAsString(JSONObject().put("claim", claim).put("mode", "browser").toString())
+        )
+        if (!resp.isSuccessful) {
+            Log.d(TAG, "redeem refused (${resp.code})")
+            return null
+        }
+        return runCatching { JSONObject(resp.text).optString("url") }.getOrNull()?.ifBlank { null }
+    }
+
+    private fun sessionHeaders(session: StreamSession, withCookie: Boolean): Map<String, String> {
+        val headers = mutableMapOf(
+            "Accept" to "application/json",
+            "Content-Type" to "application/json",
+            "Origin" to mainUrl,
+            "Referer" to "$mainUrl/"
+        )
+        session.userAgent?.let { headers["User-Agent"] = it }
+        if (withCookie) session.cookie?.let { headers["Cookie"] = it }
+        return headers
+    }
+
+    private fun nowSec() = System.currentTimeMillis() / 1000
 
     private fun parseQuality(q: String): Int {
         return when {
@@ -788,19 +893,126 @@ class Idlix : MainAPI() {
     }
 
     companion object {
-        // Presses the hero play button, then the preroll "Skip" button once its countdown ends.
+        private const val TAG = "Idlix"
+
+        // Lets the hidden WebView be inspected over adb (chrome://inspect) while testing.
+        private const val DEBUG_WEBVIEW = false
+
+        // Get a new stream token this long before the current one runs out.
+        private const val TOKEN_REFRESH_MARGIN_SEC = 120L
+
+        // For testing the token refresh: the first token is treated as running out this many
+        // seconds after the stream starts (0 = off).
+        private const val FORCE_REFRESH_AFTER_SEC = 0L
+
+        // Request the injected script makes to hand the claim/redeem data to the extension.
+        private const val SESSION_PATH = "/__cs_session.png"
+        private val SESSION_URL_REGEX = Regex("""/__cs_session\.png\?""")
+
+        private val MASTER_URL_REGEX = Regex("""majorplay\.net/v/[^?#]+/config-[^/?#]+\.json|\.m3u8""")
+
+        // Requests logged while the WebView runs, to see how far the player got.
+        private val TRACE_URL_REGEX = Regex("""/api/watch/|majorplay\.net/|challenges\.cloudflare\.com/""")
+
+        // Runs on every request the WebView makes.
+        // - The site's Turnstile widget only renders once its container is wider than 0 (later size
+        //   changes go through ResizeObserver and requestAnimationFrame, which never fire in a page
+        //   that is not shown). Two things keep it at 0 in the resolver's WebView: the WebView has
+        //   no size, and the resolver answers .css requests with an empty body, so the site's asset
+        //   check marks the page `nb-asset-failed`, whose inline rule hides every direct child of
+        //   body with `display: none !important` - including the Turnstile probe, which is portaled
+        //   into body. Give the container a fixed width and override that rule for the probe with a
+        //   more specific selector (1,1,3 against 1,1,2).
+        // - The player module also loads a CSS chunk; its failed load rejects the chunk
+        //   (ChunkLoadError) and the page shows an error instead of the player. Stop the error
+        //   from reaching the chunk loader and fire `load` on the link instead.
+        // - Wraps fetch to copy the claim response (claim, renewal token) and the redeem response
+        //   (master URL, subtitles), and hands them over in a request to SESSION_PATH. The site only
+        //   gets the redeem response after that request has gone out, so it arrives before the
+        //   master request.
+        // - Presses the hero play button, then the preroll skip button once its countdown ends
+        //   ("Lewati dalam 5 dtk" turns into "Lewati Iklan").
+        // - Returns a short state string for the log. When the state changes, it requests a .png
+        //   that the resolver answers locally (no network), only so this script runs again and the
+        //   new state reaches the log.
         private const val PLAYER_AUTOSTART_JS = """
             (function () {
-                if (window.__csIdlixAuto) return;
-                window.__csIdlixAuto = true;
-                setInterval(function () {
-                    var play = document.querySelector('button.group.cursor-pointer.z-10');
-                    if (play) play.click();
-                    document.querySelectorAll('button').forEach(function (b) {
-                        var t = (b.innerText || '').trim();
-                        if (!b.disabled && /^(skip|lewati)/i.test(t) && !/\d+\s*s$/i.test(t)) b.click();
-                    });
-                }, 1000);
+                if (!window.__csIdlixCss) {
+                    window.__csIdlixCss = true;
+                    window.addEventListener('error', function (e) {
+                        var t = e.target;
+                        if (t && t.tagName === 'LINK' && /\/_next\/static\/.+\.css/.test(t.href || '')) {
+                            e.stopImmediatePropagation();
+                            setTimeout(function () { t.dispatchEvent(new Event('load')); }, 0);
+                        }
+                    }, true);
+                }
+                if (!window.__csIdlixFetch && window.fetch) {
+                    window.__csIdlixFetch = true;
+                    var origFetch = window.fetch, session = {};
+                    window.fetch = function (input) {
+                        var url = typeof input === 'string' ? input : (input && input.url) || String(input);
+                        var p = origFetch.apply(this, arguments);
+                        if (!/\/watch\/session\/|majorplay\.net\/api\//.test(url)) return p;
+                        return p.then(function (res) {
+                            return res.clone().json().then(function (j) {
+                                if (j && j.kind === 'pentos' && j.claim) {
+                                    session.claim = j.claim;
+                                    session.redeemUrl = j.redeemUrl;
+                                    session.renewalToken = j.renewalToken;
+                                    session.progressToken = j.progressToken;
+                                } else if (j && j.url && j.mode === 'browser') {
+                                    session.url = j.url;
+                                    session.subtitles = j.subtitles || [];
+                                    new Image().src = location.origin + '/__cs_session.png?d='
+                                        + encodeURIComponent(JSON.stringify(session));
+                                }
+                                return res;
+                            }, function () { return res; });
+                        });
+                    };
+                }
+                var root = document.head || document.documentElement;
+                if (root && !document.getElementById('__csIdlixStyle')) {
+                    var st = document.createElement('style');
+                    st.id = '__csIdlixStyle';
+                    st.textContent = '.turnstile-probe,.turnstile-widget,.turnstile-widget__host'
+                        + '{display:block!important;width:320px!important;min-height:80px!important}'
+                        + 'html body>div.turnstile-probe:not(#__cs_none){display:block!important}';
+                    root.appendChild(st);
+                }
+                function state() {
+                    var s = [];
+                    if (/\bnb-asset-failed\b/.test(document.documentElement.className)) s.push('asset-failed');
+                    if (document.querySelector('button.group.cursor-pointer.z-10')) s.push('play-button');
+                    var w = document.querySelector('.turnstile-widget');
+                    if (w) s.push('turnstile w=' + w.clientWidth + ' rendered=' + (w.dataset.rendered || '-')
+                        + ' size=' + (w.dataset.size || '-'));
+                    if (document.querySelector('.turnstile-probe')) s.push('probe');
+                    if (document.querySelector('.player-status__check')) s.push('turnstile-interactive');
+                    var pill = document.querySelector('.player-pill--status');
+                    if (pill) s.push('status: ' + (pill.innerText || '').trim().slice(0, 80));
+                    if (document.querySelector('video')) s.push('video');
+                    return s.join(', ') || 'waiting';
+                }
+                if (!window.__csIdlixAuto) {
+                    window.__csIdlixAuto = true;
+                    var last = '';
+                    setInterval(function () {
+                        var play = document.querySelector('button.group.cursor-pointer.z-10');
+                        if (play) play.click();
+                        document.querySelectorAll('button').forEach(function (b) {
+                            var t = (b.innerText || '').trim();
+                            if (!b.disabled && /^(skip ad|lewati iklan)/i.test(t)) b.click();
+                        });
+                        var now = state();
+                        if (now !== last) {
+                            last = now;
+                            new Image().src = location.origin + '/__cs_state.png?' + Date.now();
+                        }
+                    }, 1000);
+                }
+                return state();
             })();
         """
     }
