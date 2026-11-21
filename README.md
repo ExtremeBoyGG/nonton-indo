@@ -61,6 +61,7 @@
 
 | Plugin | Situs | Status |
 |---|---|---|
+| <img src="https://www.google.com/s2/favicons?domain=arrowtv.net&sz=16" width="16" height="16"> ArrowTV | arrowtv.net | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=blurayufr.site&sz=16" width="16" height="16"> BlurayUFR | blurayufr.site | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=gfymultimedx.online&sz=16" width="16" height="16"> GfyMultimedx | gfymultimedx.online | ⚠️ Butuh Akun OTP |
 | <img src="https://www.google.com/s2/favicons?domain=z3.idlixku.com&sz=16" width="16" height="16"> Idlix | z3.idlixku.com | ⚠️ Development |
