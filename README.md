@@ -71,6 +71,7 @@
 | <img src="https://www.google.com/s2/favicons?domain=new1.pusatfilm21info.com&sz=16" width="16" height="16"> PusatFilm | new1.pusatfilm21info.com | ✅ Stable |
 | <img src="https://www.google.com/s2/favicons?domain=159.89.250.250&sz=16" width="16" height="16"> Rebahin | 159.89.250.250 | ⚠️ Development |
 | <img src="https://www.google.com/s2/favicons?domain=167.71.237.49&sz=16" width="16" height="16"> SemiRebahin | 167.71.237.49 | ⚠️ Development |
+| <img src="https://www.google.com/s2/favicons?domain=vivarium.st&sz=16" width="16" height="16"> Vivarium | vivarium.st | ⚠️ Development |
 
 ### Lainnya
 
