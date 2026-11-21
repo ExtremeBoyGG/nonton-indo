@@ -1,5 +1,6 @@
 package com.indo
 
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -179,14 +180,23 @@ class Nekopoi : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val doc = app.get(data, headers = ua).document
 
-        doc.select("div.nk-player-frame iframe, iframe[src]").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { return@forEach }
-            loadExtractor(src, data, subtitleCallback, callback)
-        }
+        // The player iframes (Playmogo, Streampoi, ...), once each; the page also has widget
+        // iframes such as Discord's.
+        val embeds = doc.select("div.nk-player-frame iframe, div.player-embed iframe, div.tab-content iframe, iframe[src]")
+            .map { it.attr("src").trim() }
+            .filter { it.startsWith("http") && !it.contains("discord.com") }
+            .distinct()
+        Log.d(TAG, "loadLinks: embeds ${embeds.map(::hostOf)}")
 
-        doc.select("div.player-embed iframe, div.tab-content iframe").forEach { iframe ->
-            val src = iframe.attr("src").ifBlank { return@forEach }
-            loadExtractor(src, data, subtitleCallback, callback)
+        var total = 0
+        embeds.forEach { src ->
+            var count = 0
+            loadExtractor(src, data, subtitleCallback) { link ->
+                count++
+                callback(link)
+            }
+            total += count
+            Log.d(TAG, "${hostOf(src)}: $count link(s)")
         }
 
         doc.select("video source[src]").forEach { source ->
@@ -194,8 +204,15 @@ class Nekopoi : MainAPI() {
             callback(newExtractorLink(name, "$name - Video", src) {
                 this.referer = mainUrl
             })
+            total++
         }
 
-        return true
+        return total > 0
+    }
+
+    private fun hostOf(url: String) = Regex("""^https?://([^/?#]+)""").find(url)?.groupValues?.get(1) ?: url
+
+    companion object {
+        private const val TAG = "Nekopoi"
     }
 }
