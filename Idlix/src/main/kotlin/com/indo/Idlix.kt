@@ -57,32 +57,44 @@ class Idlix : MainAPI() {
 
     /**
      * The site keeps moving between mirror domains (z2.idlixku.com, z3.idlixku.com, ...).
-     * idlixian.com stays put and answers with a 301 to the current domain, so read its Location
-     * (without following it) and switch mainUrl to that host. Checked at most once per
-     * MAIN_URL_CHECK_MS; when the backup cannot be reached, the last known domain stays.
-     * Stored links from an older domain keep working: load and loadLinks only use their slug.
+     * The BACKUP_HOSTS stay put and answer with a 301 to the current domain, so read the Location
+     * of the first one that answers (without following it) and switch mainUrl to that host.
+     * Checked at most once per MAIN_URL_CHECK_MS; when no backup can be reached (a provider may
+     * block one of them), the last known domain stays. Stored links from an older domain keep
+     * working: load and loadLinks only use their slug.
      */
     private suspend fun ensureMainUrl() {
         if (System.currentTimeMillis() - mainUrlCheckedAt < MAIN_URL_CHECK_MS) return
         mainUrlLock.withLock {
             if (System.currentTimeMillis() - mainUrlCheckedAt < MAIN_URL_CHECK_MS) return
             mainUrlCheckedAt = System.currentTimeMillis()
-            val location = runCatching {
-                app.get(BACKUP_URL, allowRedirects = false, timeout = 5L).okhttpResponse.header("Location")
-            }.onFailure { Log.d(TAG, "backup domain check failed: $it") }.getOrNull()
-            val target = location?.toHttpUrlOrNull()
-            if (target == null || target.host == BACKUP_HOST || target.host.endsWith(".$BACKUP_HOST")) {
-                Log.d(TAG, "backup domain gave no redirect, keeping $mainUrl")
+            for (backup in BACKUP_HOSTS) {
+                val target = currentDomainFrom(backup) ?: continue
+                val newMainUrl = "${target.scheme}://${target.host}"
+                if (newMainUrl != mainUrl) {
+                    Log.d(TAG, "main domain moved: $mainUrl -> $newMainUrl (via $backup)")
+                    mainUrl = newMainUrl
+                } else {
+                    Log.d(TAG, "main domain still $mainUrl (via $backup)")
+                }
                 return
             }
-            val newMainUrl = "${target.scheme}://${target.host}"
-            if (newMainUrl != mainUrl) {
-                Log.d(TAG, "main domain moved: $mainUrl -> $newMainUrl")
-                mainUrl = newMainUrl
-            } else {
-                Log.d(TAG, "main domain still $mainUrl")
-            }
+            Log.d(TAG, "no backup domain answered, keeping $mainUrl")
         }
+    }
+
+    /** The host a backup address redirects to, or null if it did not answer with a usable 301. */
+    private suspend fun currentDomainFrom(backup: String): HttpUrl? {
+        val location = runCatching {
+            app.get("https://$backup/", allowRedirects = false, timeout = 5L).okhttpResponse.header("Location")
+        }.onFailure { Log.d(TAG, "backup $backup failed: $it") }.getOrNull()
+        val target = location?.toHttpUrlOrNull()
+        val toBackup = target != null && BACKUP_HOSTS.any { target.host == it || target.host.endsWith(".$it") }
+        if (target == null || toBackup) {
+            Log.d(TAG, "backup $backup gave no redirect to a mirror")
+            return null
+        }
+        return target
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -938,9 +950,8 @@ class Idlix : MainAPI() {
     companion object {
         private const val TAG = "Idlix"
 
-        // Stable address that redirects (301) to the current mirror domain.
-        private const val BACKUP_HOST = "idlixian.com"
-        private const val BACKUP_URL = "https://$BACKUP_HOST/"
+        // Stable addresses that redirect (301) to the current mirror domain, tried in this order.
+        private val BACKUP_HOSTS = listOf("idlixian.com", "idlix.com")
         private const val MAIN_URL_CHECK_MS = 30 * 60 * 1000L
 
         // Lets the hidden WebView be inspected over adb (chrome://inspect) while testing.
